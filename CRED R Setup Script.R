@@ -60,6 +60,17 @@ additional_colors <- c("#E63946", "#F4A261", "#2A9D8F", "#264653", "#E76F51", "#
 expanded_palette <- c(rmi_palette, additional_colors)
 
 
+#APIs and Keys
+#Census APi
+#https://github.com/hrecht/censusapi
+# Add key to .Renviron
+Sys.setenv(CENSUS_KEY='0b3d37ac56ab19c5a65cbc188f82d8ce5b36cfe6')
+#Google API
+register_google(key ="AIzaSyBQFZhv1jZWHejy4BCdI5kb3JN8zfO62Wc")
+#BLS API
+bls_api_key("c5294b721a354d5da7727fc5e7a1bf30")
+
+
 #Geographies
 census_divisions<- read.csv('https://raw.githubusercontent.com/cphalpert/census-regions/master/us%20census%20bureau%20regions%20and%20divisions.csv')
 us_counties <-us_map("counties")
@@ -69,6 +80,11 @@ state_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Reg
 msa_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/msa_gdp_2022.csv',skip=3)
 states_simple <- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/US Maps etc/Regions/rmi_regions.csv')
 county_cbsa<-read.csv("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/US Maps etc/Regions/csa_cbsa_county.csv",skip=2)
+county_cbsa<-county_cbsa %>%
+  mutate(fips=as.numeric(paste0(FIPS.State.Code,FIPS.County.Code))) 
+
+county_pop<-read.csv('https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv')
+
 EAs<-read_excel("RMI/US Program - Regional Investment Strategies/Great Lakes Investment Strategy/Reference Data/BEA Economic Areas and Counties.xls",2)
 EAs<-EAs %>%
   mutate(fips=as.numeric(FIPS))
@@ -87,4 +103,6 @@ naics2017 <- read_excel(temp_file, sheet = 1)  # 'sheet = 1' to read the first s
 
 naics2022<-read_excel('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/2022_to_2017_NAICS.xlsx',1,skip=2)
 
+#Energy Transition Industries - RMI Definition
+eti_long<-read_excel("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/Transition_Industries_FINAL.xlsx",2)
 

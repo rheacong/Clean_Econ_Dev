@@ -1,30 +1,13 @@
 #Net Zero America Downscaling
 
+# State Variable - Set this to the abbreviation of the state you want to analyze
+state_abbreviation <- "MT"  # Replace with any US state abbreviation
+state_name <- "Montana"  # Replace with the full name of any US state
+region_name <- "Great Falls, MT"
+
 #Set the Working Directory to your Username
 setwd("C:/Users/LCarey.RMI/")
 
-#Create Relevant Downscaling file by county and/or Economic Area
-great_falls<-EAs %>%
-  filter(`EA Name`=="Great Falls, MT"|
-           County %in% c("Judith Basin County, MT",
-                         "Fergus County, MT",
-                         "Lewis and Clark County, MT"))
-
-region_id <- great_falls
-
-EAs<-EAs%>%
-  mutate(`EA Name`=ifelse(FIPS %in% great_falls$FIPS,"Great Falls, MT",`EA Name`)) %>%
-  left_join(counties %>% 
-              select(STATEFP,COUNTYFP) %>%
-              mutate(FIPS=paste0(STATEFP,COUNTYFP)),by=c("FIPS"="FIPS")) %>%
-  mutate(statefp=as.numeric(STATEFP)) %>%
-  left_join(states_simple,by=c("statefp"="fips")) %>%
-  select(-geometry) 
-
-#Filter for specific counties from US Map package
-region_counties<-us_counties %>%
-  filter(fips %in% region_id$FIPS) %>%
-  left_join(census_divisions,by=c("abbr"="State.Code","full"="State"))
 
 
 #Use County Business Patterns Census Data for Employment figures at county level
