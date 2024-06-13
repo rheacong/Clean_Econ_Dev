@@ -76,6 +76,7 @@ census_divisions<- read.csv('https://raw.githubusercontent.com/cphalpert/census-
 us_counties <-us_map("counties")
 counties <- counties(class = "sf")
 county_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/county_gdp_2022.csv',skip=3)
+county_gdp <-county_gdp %>% mutate(fips=as.numeric(GeoFips))
 state_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/state_gdp_22.csv',skip=3)
 msa_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/msa_gdp_2022.csv',skip=3)
 states_simple <- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/US Maps etc/Regions/rmi_regions.csv')

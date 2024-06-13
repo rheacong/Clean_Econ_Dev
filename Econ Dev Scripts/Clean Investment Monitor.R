@@ -7,8 +7,14 @@
 #4. Announced Investments by Segment, Technology within States, Economic Areas and MSAs
 
 # State Variable - Set this to the abbreviation of the state you want to analyze
-state_abbreviation <- "MT"  # Replace with any US state abbreviation
-state_name <- "Montana"  # Replace with the full name of any US state
+state_abbreviation <- "NM"  # Replace with any US state abbreviation
+state_name <- "New Mexico"  # Replace with the full name of any US state
+
+#Set the Working Directory to your Username
+setwd("C:/Users/LCarey.RMI/")
+
+#Create output folder and update
+output_folder <- paste0("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Slide Decks/States/",state_abbreviation)
 
 
 # Clean investment Monitor Data - Check it's the latest quarter available
@@ -579,3 +585,267 @@ facilities_EA_total <- facilities_EA_total %>%
   mutate(top50=ifelse(Relative_Rank<51,`EA Name`,"")) %>%
   mutate(msa_name=paste0(`EA Name`," (EA)")) %>%
   mutate(region="EA") 
+
+
+#Federal Tax Credit Incentives State-Level Estimates
+tax_inv_cat<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_category.csv',skip=2)
+tax_inv_state<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_state.csv',skip=2)
+
+#45X
+fac_45x<-facilities %>%
+  filter(Segment=="Manufacturing",
+         Technology %in% c("Solar",
+                           "Wind",
+                           "Critical Minerals",
+                           "Batteries"),
+         Current_Facility_Status=="O") %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(cap_share=Total_Facility_CAPEX_Estimated/sum(Total_Facility_CAPEX_Estimated)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Advanced Manufacturing Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate(state_45x = Total.Federal.Investment.2022USBn*cap_share) 
+
+#45V & 45Q
+fac_45vq<-investment %>%
+  filter(Segment=="Energy and Industry",
+         Technology %in% c("Hydrogen")|
+           Technology=="Carbon Management" & Subcategory %in% c("CCUS","Direct Air Capture")|
+           Technology=="Sustainable Aviation Fuels") %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(cap_share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Emerging Climate Technology Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate(state_45vq = Total.Federal.Investment.2022USBn*cap_share) 
+
+#45
+url <- 'https://www.eia.gov/electricity/data/eia860m/xls/april_generator2024.xlsx'
+destination_folder<-'OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/States Data/'
+file_path <- paste0(destination_folder, "eia_op_gen.xlsx")
+downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
+
+#Operating Generation
+op_gen <- read_excel(file_path, sheet = 1,skip=2)
+
+state_45 <- op_gen %>%
+  filter(Status=="(OP) Operating",
+         Technology %in% c("Onshore Wind Turbine",
+                           "Solar Photovoltaic",
+                           "Batteries",
+                           "Solar Thermal with Energy Storage",
+                           "Geothermal",
+                           "Conventional Hydroelectric",
+                           "Landfill Gas",
+                           "Wood/Wood Waste Biomass")) %>%
+  group_by(`Plant State`) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) %>%
+  ungroup() %>%
+  mutate(share_mw=`Nameplate Capacity (MW)`/sum(`Nameplate Capacity (MW)`)) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("Plant State"="State")) %>%
+  cbind(tax_inv_cat %>% filter(Category=="Clean Electricity Tax Credits")) %>%
+  mutate(state_45 = Total.Federal.Investment.2022USBn*share_mw)
+
+#48
+url <- 'https://www.eia.gov/electricity/monthly/xls/table_6_01_b.xlsx'
+dest_file <- tempfile(fileext = ".xlsx")
+download.file(url, destfile = dest_file, mode = "wb")
+
+data <- read_excel(dest_file)
+
+rooftop_state<-read_excel("C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/small_scale_solar_2024.xlsx",sheet=1,skip=2)
+rooftop_state <- rooftop_state %>%
+  rename_with(~c("res_cap",
+                 "com_cap",
+                 "ind_cap",
+                 "total_cap",
+                 "res_gen", 
+                 "com_gen",
+                 "ind_gen",
+                 "total_gen"), .cols = 5:12) %>%
+  mutate(across(c(res_cap:total_gen),as.numeric)) 
+
+state_48 <- rooftop_state %>%
+  filter(!State %in% c("US"),
+         !is.na(State)) %>%
+  mutate(com_gen = replace_na(com_gen, 0),
+         res_gen = replace_na(res_gen, 0),
+         ind_gen = replace_na(ind_gen, 0)) %>%
+  select(State,ind_gen,com_gen,res_gen) %>%
+  mutate(com_share=(ind_gen+com_gen)/sum((ind_gen+com_gen)),na.rm=T,
+         res_share=res_gen/sum(res_gen),na.rm=T) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  cbind(tax_inv_cat %>% filter(Category=="Non-residential Distributed Energy Tax Credits")) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Residential Energy & Efficiency Tax Credits"),by=c("Segment")) %>%
+  mutate(state_48_res = Total.Federal.Investment.2022USBn.y*(res_share)) %>%
+  mutate(state_48_com=  Total.Federal.Investment.2022USBn.x*(com_share))
+
+state_48 <- investment %>%
+  filter(Segment=="Retail",Technology %in% c("Heat Pumps","Distributed Electricity and Storage"),
+         quarter %in% c("2022-Q2",
+                        "2022-Q3",
+                        "2022-Q4",
+                        "2023-Q1",
+                        "2023-Q2",
+                        "2023-Q3",
+                        "2023-Q4",
+                        "2024-Q1")) %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Non-residential Distributed Energy Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Residential Energy & Efficiency Tax Credits"),by=c("Segment")) %>%
+  mutate(state_48_res = Total.Federal.Investment.2022USBn.y*(share)) %>%
+  mutate(state_48_com=  Total.Federal.Investment.2022USBn.x*(share))
+
+#zev
+zev<-investment %>%
+  filter(Segment=="Retail",Technology=="Zero Emission Vehicles",
+         quarter %in% c("2022-Q2",
+                        "2022-Q3",
+                        "2022-Q4",
+                        "2023-Q1",
+                        "2023-Q2",
+                        "2023-Q3",
+                        "2023-Q4",
+                        "2024-Q1")) %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(share_ev=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Zero Emission Vehicle Tax Credits"),by=c("Segment")) %>%
+  mutate(state_zev = Total.Federal.Investment.2022USBn*share_ev)
+
+#combine
+state_estimates<-state_45 %>%
+  rename(State=`Plant State`) %>%
+  select(State,state_45) %>%
+  left_join(fac_45x %>% select(State,state_45x),by=c("State")) %>%
+  left_join(fac_45vq %>% select(State,state_45vq),by=c("State")) %>%
+  left_join(state_48 %>% select(State,state_48_res,state_48_com),by=c("State")) %>%
+  left_join(zev %>% select(State,state_zev),by=c("State")) %>%
+  ungroup() %>%
+  select(-geometry,-Segment.x,-Segment.y) %>%
+  mutate(across(where(is.numeric), ~replace_na(., 0))) %>%
+  mutate(total=(state_45+state_45x+state_45vq+state_48_res+state_48_com+state_zev)) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate("Clean Electricity Tax Credits"=state_45/total*Total.Federal.Investment..2022.Million.USD.,
+         "Advanced Manufacturing Tax Credits"=state_45x/total*Total.Federal.Investment..2022.Million.USD.,
+         "Emerging Climate Technology Tax Credits"=state_45vq/total*Total.Federal.Investment..2022.Million.USD.,
+         "Residential Energy & Efficiency Tax Credits"=state_48_res/total*Total.Federal.Investment..2022.Million.USD.,
+         "Non-residential Distributed Energy Tax Credits"=state_48_com/total*Total.Federal.Investment..2022.Million.USD.,
+         "Zero Emission Vehicle Tax Credits"=state_zev/total*Total.Federal.Investment..2022.Million.USD.)
+
+cat_estimate<- state_estimates %>%
+  mutate(across(where(is.numeric),~sum(.)))
+
+state_estimates2<-state_estimates %>%
+  select(State,`Clean Electricity Tax Credits`,
+         `Advanced Manufacturing Tax Credits`,
+         `Emerging Climate Technology Tax Credits`,
+         `Residential Energy & Efficiency Tax Credits`,
+         `Non-residential Distributed Energy Tax Credits`,
+         `Zero Emission Vehicle Tax Credits`) %>%
+  pivot_longer(cols=-State,names_to="Category",values_to="Federal Investment (millions 2022 USD)") %>%
+  left_join(tax_inv_state %>% select(State,State.GDP..2022.Million.USD.),by=c("State")) %>%
+  mutate("Federal Investment (millions 2022 USD)"=round(`Federal Investment (millions 2022 USD)`,2),
+         "State GDP (millions 2022 USD)"=round(State.GDP..2022.Million.USD.,2),
+         "Federal Investment (% of State GDP)"=round(`Federal Investment (millions 2022 USD)`/`State GDP (millions 2022 USD)`*100,2)) 
+
+ggplot(data=state_estimates2) +
+  geom_col(aes(x=reorder(State,-`Federal Investment (millions 2022 USD)`),y=`Federal Investment (millions 2022 USD)`,fill=Category),position="stack") +
+  coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = "Federal IRA Investment by State, Cateogry", 
+       subtitle = "",
+       x="State",
+       fill = "Tax Credit",
+       caption="Source: Clean Investment Monitor")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.8)) 
+
+ggplot(data=state_estimates2) +
+  geom_col(aes(x=reorder(State,-`Federal Investment (% of State GDP)`),y=`Federal Investment (% of State GDP)`,fill=Category),position="stack") +
+  coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = "Federal IRA Investment by State, Cateogry", 
+       subtitle = "Percentage of 2022 GDP",
+       x="State",
+       fill = "Tax Credit",
+       caption="Source: Clean Investment Monitor")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.8)) 
+
+
+#State Map
+
+# Get US state map data
+us_states <-us_map("states")
+state_map_data <- left_join(us_states, tax_inv_state, by = c("abbr" = "State"))
+state_map_data <- state_map_data%>%
+  mutate(invcap_bin=cut(Federal.Investment..2022.USD.per.capita.,breaks=c(0,50,100,250,500,1000),labels=c("0-$50","$50-100","$100-250","$250-500","$400-500","$500+")))
+
+
+state_labels<-centroid_labels(regions = c("states"))
+state_labels <- state_labels %>%
+  left_join(tax_inv_state,by=c("abbr"="State"))
+
+# Plotting the US state map with investment data
+state_ira_map<-ggplot() +
+  geom_polygon(data = state_map_data, aes(x=x,y=y,group=group,fill = invcap_bin), color = "white") +
+  geom_text(data = state_labels, aes(x = x, y = y, label = abbr), size = 2, color = "black", fontface = "bold") +
+  scale_fill_manual(values=rmi_palette)+
+  #scale_fill_gradient2(low="#E63946",high="#2A9D8F", midpoint=median(tax_inv_state$Federal.Investment..2022.USD.per.capita.),na.value = "grey90", name = "Tax Credit $ per person") +
+  labs(title = "Federal Tax Credits per Capita, 2022", 
+       subtitle = "",
+       fill = "2022 USD per capita",
+       caption="Source: Clean Investment Monitor") +
+  theme_void()+
+  theme(legend.position=c(0.9,0.1),
+        plot.background = element_rect(fill = "white", color = "white"),
+        panel.background = element_rect(fill = "white", color = "white"))
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"state_ira_map", ".png")), 
+       plot = state_ira_map,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+
+
+#Regional State Comparisons
+division_of_interest<-census_divisions %>%
+  filter(State.Code==state_abbreviation)
+
+state_ira <- state_estimates2 %>%
+  left_join(census_divisions,by=c("State"="State.Code")) %>%
+  filter(Division == division_of_interest$Division) 
+
+state_ira_plot<-ggplot(data=state_ira) +
+  geom_col(aes(x=reorder(State,-`Federal Investment (% of State GDP)`),y=`Federal Investment (% of State GDP)`,fill=Category),position="stack") +
+  #coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = paste("Federal IRA Investment in the ",division_of_interest$Division," Division by Tax Credit"),
+       subtitle = "Percentage of 2022 GDP",
+       x="State",
+       fill = "Tax Credit",
+       caption="Source: Clean Investment Monitor")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.8),
+        plot.background = element_rect(fill = "white", color = "white"),
+        panel.background = element_rect(fill = "white", color = "white")) 
+
+  
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_state_ira_plot", ".png")), 
+       plot = state_ira_plot,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+  
+  

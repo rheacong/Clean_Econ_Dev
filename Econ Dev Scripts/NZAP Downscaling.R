@@ -254,13 +254,13 @@ nza_cap_inv <- nza_states %>%
   ungroup() %>%
   select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
   pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value") %>%
-  mutate(variable=ifelse(grepl("Biomass",variable_name),"Biomass",variable_name)) %>%
-  left_join(rengen_share  %>%
-              filter(region_of_interest==1) %>%
-              select(tech,share),by=c("variable"="tech")) %>%
-  mutate(Value_region=Value*share) 
+  mutate(variable=ifelse(grepl("Biomass",variable_name),"Biomass",variable_name)) 
+  #left_join(rengen_share  %>%
+   #           filter(region_of_interest==1) %>%
+    #          select(tech,share),by=c("variable"="tech")) %>%
+  #mutate(Value_region=Value*share) 
 
-plot_nza_ren_capinv<-ggplot(data=nza_cap_inv,aes(x=year,y=Value_region,fill=variable_name)) +
+plot_nza_ren_capinv<-ggplot(data=nza_cap_inv,aes(x=year,y=Value,fill=variable_name)) +
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
   scale_fill_manual(values = expanded_palette)+
@@ -328,3 +328,49 @@ plot_nza_finalenergyuse<-ggplot(data=nza_final_energyuse,aes(x=year,y=Value_regi
   scale_y_continuous(expand = c(0,0))+
   theme_classic()+
   theme(legend.position="bottom")
+
+#Energy Production
+nza_energy_production<- nzap %>%
+  #filter(scenario %in% c("REF","E+","E+RE+")) %>%
+  drop_na(value) %>%
+  filter(geo != "National") %>%
+  filter(filter_level_3 %in% c("Natural gas production" ,
+                               "Oil production")) 
+
+nza_oil_prod_10 <- nza_energy_production %>%
+  filter(year=="2025",
+         filter_level_3=="Oil production") %>%
+  slice_max(order_by=value,n=10) 
+nza_gas_prod_10 <- nza_energy_production %>%
+  filter(year=="2025",
+         filter_level_3=="Natural gas production") %>%
+  slice_max(order_by=value,n=10) 
+
+nza_energy_prod<- nza_energy_production %>%
+  filter(geo %in% nza_oil_prod_10$geo|
+           geo %in% nza_gas_prod_10$geo) %>%
+  group_by(geo,filter_level_3) %>%
+  mutate(value_norm=value/value[year=="2025"]*100)
+
+plot_nza_energyprod<-ggplot(data=nza_energy_prod %>%
+                              filter(geo==state_name),aes(x=year,y=value,group=filter_level_3,fill=filter_level_3)) +
+  geom_col() +
+  facet_wrap(~ filter_level_3, scales = "free_y") +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette, name="Fossil Fuel")+
+  labs(title=paste("Fossil Fuel Production in", state_name, "in a Net Zero Scenario"),
+       subtitle = " ",
+       x="Year", y="Natural Gas (tcf) & Oil (mbbl) Production",
+       caption="Source: Net Zero America (2021), Princeton University") +
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()+
+  theme(legend.position="bottom")
+
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_plot_nza_energyprod", ".png")), 
+       plot = plot_nza_energyprod,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+
+
+

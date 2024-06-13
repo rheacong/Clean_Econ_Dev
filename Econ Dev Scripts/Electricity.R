@@ -16,6 +16,9 @@ state_abbreviation <- "MT"  # Replace with any US state abbreviation
 state_name <- "Montana"  # Replace with the full name of any US state
 region_name <- "Great Falls, MT"
 
+#Set the Working Directory to your Username
+setwd("C:/Users/LCarey.RMI/")
+
 #If necessary, Create Relevant Downscaling file by county and/or Economic Area
 great_falls<-EAs %>%
   filter(`EA Name`=="Great Falls, MT"|
@@ -144,6 +147,23 @@ states_rengen <- states_gen %>%
   group_by(region,full) %>%
   mutate(cap_index_18 = 100*cum_cap/cum_cap[Year=="2022-01-01"]) %>%
   mutate(rengrowth_18_23 = round(cap_index_18-100,1))
+
+
+plot_elec_2020index<-ggplot(data=states_rengen %>%
+                              filter(region == region_abbrv$region),
+                            aes(x=Year,
+                                y=cap_index_18,
+                                group=full,
+                                color=full)) +
+  geom_line(data = subset(states_rengen%>%filter(region == region_abbrv$region), full != state_name), size = 1) +  # Plot other lines
+  geom_line(data = subset(states_rengen%>%filter(region == region_abbrv$region,), full == state_name), size = 2) +
+  scale_size_identity() +
+  labs(title="Renewable Electricity Growth since 2022",
+       subtitle="Cumulative Renewable Capacity Additions since 2012, indexed to Jan 2022",
+       x="", y="Index (100=08-2020)",
+       color="State")+
+  theme_classic()+
+  scale_color_manual(values = rmi_palette)
 
 region_abbrv<-states_simple %>%
   filter(abbr == state_abbreviation) 

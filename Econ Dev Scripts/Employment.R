@@ -20,6 +20,7 @@ cbp_2021 <- getCensus(
          "PAYANN"),
   region = "county:*",
   vintage = 2021)
+
 cbp_21<-cbp_2021
 
 #Join with State Abbreviations for state names etc
@@ -27,8 +28,8 @@ cbp_21$state<-as.numeric(cbp_21$state)
 cbp_21<-left_join(states_simple,cbp_21,by=c("fips"="state"))
 
 #join with NAICS Codes to get industry descriptions
-cbp_21$NAICS2017<-as.numeric(cbp_21$NAICS2017)
-cbp_21 <-left_join(cbp_21,eti,by=c("NAICS2017"="6-Digit Code"))
+cbp_21$naics2017<-as.numeric(cbp_21$NAICS2017)
+#cbp_21 <-left_join(cbp_21,eti_long,by=c("naics2017"="6-Digit Code"))
 
 #Six Digit Level
 cbp_21 <- cbp_21 %>%
@@ -36,7 +37,7 @@ cbp_21 <- cbp_21 %>%
 
 #Two Digit Level
 cbp21_2d <- cbp_2021 %>%
-  mutate(state=as.numeric(state)) %>%
+  mutate(state=as.numeric(STATE)) %>%
   filter(INDLEVEL=="2")  %>%
   mutate(FIPS=paste0(STATE, COUNTY)) %>%
   left_join(EAs,by=c("FIPS"="FIPS")) %>%
@@ -60,9 +61,9 @@ region_totalemp<-region_cbp_2d %>%
 
 #Calculate proportions
 total_emp <- cbp21_2d %>%
-  group_by(GEOID,state,county,full,NAME,NAMELSAD) %>%
-  summarize_at(vars(EMP),sum,na.rm=T) 
+  filter(NAICS2017=="0")
 total_emp_nat<-cbp21_2d  %>%
+  filter(NAICS2017=="0") %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
   ungroup() 
 
@@ -88,10 +89,10 @@ fossil_emp_national <- cbp_21 %>%
 
 fossil_emp_county <- cbp_21 %>%
   mutate(fossil = ifelse(NAICS2017 %in% fossil_codes$NAICS_code,1,0)) %>%
-  group_by(FIPS,full,fossil) %>%
+  group_by(abbr,full,STATE,COUNTY,fossil) %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
-  left_join(total_emp %>% select(GEOID,full,NAME,EMP), by = c("full"="full","FIPS"="GEOID"), suffix = c("", "_total")) %>%
-  select(FIPS,state,county,full,NAME,EMP,EMP_total,fossil) %>%
+  left_join(total_emp %>% select(STATE,COUNTY,EMP), by = c("STATE"="STATE","COUNTY"="COUNTY"), suffix = c("", "_total")) %>%
+  select(abbr,full,STATE,COUNTY,EMP,EMP_total,fossil) %>%
   ungroup() %>%
   mutate(emp_share = EMP / EMP_total) %>%
   left_join(fossil_emp_national, by = c("fossil" = "fossil")) %>%
@@ -99,31 +100,37 @@ fossil_emp_county <- cbp_21 %>%
 
 fossil_emp_map <- fossil_emp_county %>%
   filter(full==state_name) %>%
-  select(full,FIPS,NAME,fossil,lq) %>%
+  mutate(FIPS=paste0(STATE,COUNTY))%>%
+  select(full,FIPS,fossil,lq) %>%
   pivot_wider(names_from=fossil,values_from=lq) %>%
-  mutate(region_id=ifelse(FIPS %in% region_counties$fips,1,0.7),
+  mutate(region_id=ifelse(FIPS %in% region_counties$fips,1,1),
          lq = ifelse(is.na(`1`),0,`1`)) %>%
-  select(full,FIPS,NAME,region_id,lq) 
+  select(full,FIPS,region_id,lq) 
 
 #Fossil Fuel Employment-Map
+us_counties<-us_map("counties")
 fossil_map_data <- inner_join(us_counties, fossil_emp_map, by = c("fips" = "FIPS"))
+fossil_map_data <- fossil_map_data %>%
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), 0, .))) %>%
+  mutate(lq_bin=cut(lq, breaks = c(-1, 1, 5, 20, 100), labels = c("Below Average (0-1)","Above Average (1-5)", "High (5-20)", "Very High (20+)"))) 
 
 county_labels<-centroid_labels(regions = c("counties"))
 county_labels <- county_labels %>%
-  inner_join(fossil_emp_map,by=c("fips"="FIPS")) %>%
-  mutate(NAME=ifelse(region_id==1,NAME,""))
+  inner_join(fossil_emp_map,by=c("fips"="FIPS")) 
+#%>%  mutate(NAME=ifelse(region_id==1,NAME,""))
 
+library(ggrepel)
 fossil_lq_map<-ggplot() +
-  geom_polygon(data = fossil_map_data, aes(x = x, y = y, group = group, fill = lq, alpha = region_id), color = "#0BD0D9") +
-  geom_text(data = county_labels, aes(x = x, y = y, label = NAME), size = 2, color = "darkgrey", fontface = "bold") +
-  scale_fill_gradient(low="white",high="#003A61", na.value = "grey90", name = "Fossil Fuel Location Quotient") +
+  geom_polygon(data = fossil_map_data, aes(x = x, y = y, group = group, fill = lq_bin, alpha = region_id), color = "darkgrey") +
+  geom_text_repel(data = county_labels, aes(x = x, y = y, label = county), size = 2, color = "black", fontface = "bold") +
+  scale_fill_manual(values=rmi_palette, name = "Specialization") +
   scale_alpha_identity() +
   labs(title = paste("Fossil Fuel Specialization in ", state_name), 
-       subtitle = "A location quotient indicates specialization in local employment. A score greater than one indicates that the subject area's employment in fossil fuel industires is greater than the national average.",
+       subtitle = "Fossil employment share by county, relative to the national average.",
        fill = "Location Quotient",
        caption = "Source: Census Bureau, County Business Patterns") +
   theme_void() +
-  theme(legend.position = c(0.9, 0.1),
+  theme(legend.position = "right",
         plot.background = element_rect(fill = "white", color = "white"),
         panel.background = element_rect(fill = "white", color = "white"))
 
