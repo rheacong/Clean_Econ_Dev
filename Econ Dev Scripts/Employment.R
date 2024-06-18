@@ -6,6 +6,15 @@
 #3. Employment Diversity (Hachman Index) Map
 
 
+# State Variable - Set this to the abbreviation of the state you want to analyze
+state_abbreviation <- "NM"  # Replace with any US state abbreviation
+state_name <- "New Mexico"  # Replace with the full name of any US state
+region_name <- "Great Falls, MT"
+
+#Make a region_id for your state/region of interest
+region_id <- us_counties %>%
+  filter(abbr == state_abbreviation) 
+
 #County Business Patterns
 cbp_2021 <- getCensus(
   name = "cbp",
@@ -32,11 +41,12 @@ cbp_21$naics2017<-as.numeric(cbp_21$NAICS2017)
 #cbp_21 <-left_join(cbp_21,eti_long,by=c("naics2017"="6-Digit Code"))
 
 #Six Digit Level
-cbp_21 <- cbp_21 %>%
+cbp_21_6d <- cbp_21 %>%
   filter(INDLEVEL=="6")
 
 #Two Digit Level
-cbp21_2d <- cbp_2021 %>%
+cbp21_2d <- cbp_21 %>%
+  select(-fips) %>%
   mutate(state=as.numeric(STATE)) %>%
   filter(INDLEVEL=="2")  %>%
   mutate(FIPS=paste0(STATE, COUNTY)) %>%
@@ -61,9 +71,9 @@ region_totalemp<-region_cbp_2d %>%
 
 #Calculate proportions
 total_emp <- cbp21_2d %>%
-  filter(NAICS2017=="0")
+  filter(NAICS2017=="00")
 total_emp_nat<-cbp21_2d  %>%
-  filter(NAICS2017=="0") %>%
+  filter(NAICS2017=="00") %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
   ungroup() 
 
@@ -89,6 +99,7 @@ fossil_emp_national <- cbp_21 %>%
 
 fossil_emp_county <- cbp_21 %>%
   mutate(fossil = ifelse(NAICS2017 %in% fossil_codes$NAICS_code,1,0)) %>%
+  filter(fossil==1) %>%
   group_by(abbr,full,STATE,COUNTY,fossil) %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
   left_join(total_emp %>% select(STATE,COUNTY,EMP), by = c("STATE"="STATE","COUNTY"="COUNTY"), suffix = c("", "_total")) %>%
@@ -139,6 +150,12 @@ ggsave(file.path(output_folder, paste0(state_abbreviation,"_fossil_lq_map", ".pn
        width = 8,   # Width of the plot in inches
        height = 8,   # Height of the plot in inches
        dpi = 300)
+
+#Bar Charts
+fossil_emp_state <- fossil_emp_county %>%
+  filter(full==state_name) %>%
+  mutate(FIPS=paste0(STATE,COUNTY)) %>%
+  left_join(county_labels,by=c("FIPS"="fips")) 
 
 
 #Diversity
