@@ -83,6 +83,16 @@ write.csv(state_fedinv_map,paste0(output_folder,"/",state_abbreviation,"_state_f
 tax_inv_cat<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_category.csv',skip=2)
 tax_inv_state<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_state.csv',skip=2)
 
+# Clean investment Monitor Data - Check it's the latest quarter available
+investment_data_path <- './Data/quarterly_actual_investment.csv'
+facilities_data_path <- './Data/manufacturing_energy_and_industry_facility_metadata.csv'
+socioeconomics_data_path <- './Data/socioeconomics.csv'
+
+# Read Data
+investment <- read.csv(investment_data_path, skip=5)
+facilities <- read.csv(facilities_data_path, skip=5)
+socioecon <- read.csv(socioeconomics_data_path, skip=5)
+
 #45X
 fac_45x<-facilities %>%
   filter(Segment=="Manufacturing",
@@ -202,7 +212,7 @@ state_estimates<-state_45 %>%
   left_join(state_48 %>% select(State,state_48_res,state_48_com),by=c("State")) %>%
   left_join(zev %>% select(State,state_zev),by=c("State")) %>%
   ungroup() %>%
-  select(-geometry,-Segment.x,-Segment.y) %>%
+  select(-Segment.x,-Segment.y) %>%
   mutate(across(where(is.numeric), ~replace_na(., 0))) %>%
   mutate(total=(state_45+state_45x+state_45vq+state_48_res+state_48_com+state_zev)) %>%
   left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
@@ -328,6 +338,8 @@ gjf_stateagency <- gjf %>%
   summarize_at(vars(subs_m,investment_m), sum, na.rm = TRUE) %>%
   arrange(desc(subs_m))
 
+write.csv(gjf_stateagency, file = paste0(state_abbreviation, "_gjf_stateagency", ".csv"))
+
 #State Totals by Program Name
 gjf_stateprogram_1923<-gjf %>%
   filter(Location== state_name,
@@ -337,14 +349,16 @@ gjf_stateprogram_1923<-gjf %>%
   ungroup()  %>%
   arrange(desc(subs_m))
 
+write.csv(gjf_stateprogram_1923, file = paste0(state_abbreviation, "_gjf_stateprogram", ".csv"))
+
 #Project Subsidies >2% of investment value
 gjf_meaningful_1923 <- gjf %>%
   filter(investment_m != 0,
-         Location== "Ohio",
+         Location== state_name,
          subs_m/investment_m>0.01,
          Year==2022) %>%
   mutate(subs_share=round(subs_m/investment_m*100,1)) %>%
   select(abbr,Location,Year,subs_share,subs_m,Investment.Data,investment_m,Company,Project.Description,Major.Industry.of.Parent, Sector,Awarding.Agency,Program.Name,Type.of.Subsidy,Notes) %>%
   arrange(desc(subs_share))
 
-
+write.csv(gjf_meaningful_1923, file = paste0(state_abbreviation, "_gjf_meaningful", ".csv"))
