@@ -324,7 +324,7 @@ nza_final_energyuse <- nza_states %>%
   ungroup() %>%
   select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
   pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value") %>%
-  mutate(share=region_eleccons$share) %>%
+  mutate(share=region_eleccons$share[region_eleccons$`EA Name`==region_name]) %>%
   mutate(Value_region=Value*share) 
 
 plot_nza_finalenergyuse<-ggplot(data=nza_final_energyuse,aes(x=year,y=Value_region,fill=variable_name)) +
