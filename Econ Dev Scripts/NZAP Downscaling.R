@@ -4,6 +4,11 @@
 state_abbreviation <- "MT"  # Replace with any US state abbreviation
 state_name <- "Montana"  # Replace with the full name of any US state
 region_name <- "Great Falls, MT"
+region_abbrv <- states_simple %>% filter(abbr == state_abbreviation)
+
+#Make a region_id for your state/region of interest
+region_id <- us_counties %>%
+  filter(abbr == state_abbreviation) 
 
 #Set the Working Directory to your Username
 setwd("C:/Users/LCarey.RMI/")
@@ -49,7 +54,7 @@ cbp21_2d <- cbp_2021 %>%
 
 #Filter just for region of interest
 region_cbp_2d <- cbp21_2d %>%
-  filter(abbr==state_abbreviation) %>%
+  filter(STATE==states_simple$fips[states_simple$abbr==state_abbreviation]) %>%
   mutate(region_id=ifelse(fips %in% region_id$fips,1,0)) %>%
   mutate(code=ifelse(NAICS2017 %in% c("00","11","21","22","23","31-33","42","48-49","54"),NAICS2017,"Other")) %>%
   group_by(region_id,code) %>%
@@ -82,6 +87,7 @@ county_eleccons <- county_elec_cons %>% #filter for 2022 and electricity consump
   mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY))) %>%
   left_join(EAs,by=c("FIPS"="FIPS")) %>% #for Economic Areas
   left_join(county_cbsa,by=c("fips"="fips")) %>% #For Metropolitan Statistical Areas
+  left_join(states_simple, by=c("STATE"="fips")) %>%
   select(region,abbr,full,County,`EA Name`,CBSA.Title,FIPS,fips,Consumption.MMBtu)
 
 msa_eleccons <- county_eleccons %>% #group by MSA
@@ -95,7 +101,7 @@ ea_eleccons <- county_eleccons %>% #group by Economic Area
 #County-level Electricity Consumption for Region of Interest
 region_eleccons<-county_eleccons %>%
   filter(abbr== state_abbreviation) %>%
-  mutate(region_id=ifelse(FIPS %in% region_id$FIPS,1,0)) %>%
+  mutate(region_id=ifelse(FIPS %in% region_id$fips,1,0)) %>%
   group_by(`EA Name`,region_id) %>%
   summarize_at(vars(Consumption.MMBtu),sum,na.rm=T) %>%
   ungroup() %>%
@@ -123,13 +129,14 @@ EA_gen <- op_gen_with_county %>%
   mutate(fips=as.numeric(GEOID)) %>%
   inner_join(EAs,by=c("fips"="fips")) %>%
   filter(Status=="(OP) Operating") %>% #Only Operating Plants
+  left_join(states_simple, by=c("Plant State"="abbr")) %>%
   group_by(region,full,`EA Name`,`Operating Year`,Technology) %>%
   summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) 
 
 #Generating Capacity within Region of Interest
 region_rengen <- EA_gen %>%
   as.data.frame(.) %>%
-  filter(region %in% region_counties$region) %>%
+  filter(region %in% region_abbrv$region) %>%
   mutate(tech = case_when( #Group similar technologies
     Technology=="Natural Gas Steam Turbine" ~ "Natural Gas",
     Technology=="Natural Gas Fired Combined Cycle" ~ "Natural Gas",
@@ -217,6 +224,8 @@ plot_nza_jobs_econ<-ggplot(data=nza_jobs_region, aes(x=year,y=Value,fill=variabl
   theme_classic()+
   theme(legend.position="bottom")
 
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_jobs_econ.png"),plot=plot_nza_jobs_econ,width=8,height=6,units="in",dpi=300)
+
 #Jobs by Resource Sector
 nza_jobs_resource <- nza_states %>%
   ungroup()%>%
@@ -230,7 +239,6 @@ nza_jobs_resource <- nza_states %>%
 nza_jobs_resource_region <- nza_jobs_resource %>%
   mutate(Value=Value*region_totalemp$share) 
 
-
 plot_nza_jobs_resource<-ggplot(data=nza_jobs_resource_region, aes(x=year,y=Value,fill=variable_name)) +
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
@@ -243,6 +251,7 @@ plot_nza_jobs_resource<-ggplot(data=nza_jobs_resource_region, aes(x=year,y=Value
   theme_classic()+
   theme(legend.position="bottom")
 
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_jobs_resource.png"),plot=plot_nza_jobs_resource,width=8,height=6,units="in",dpi=300)
 
 #Capital Invested in Electricity Generation Chart
 nza_cap_inv <- nza_states %>%
@@ -271,6 +280,7 @@ plot_nza_ren_capinv<-ggplot(data=nza_cap_inv,aes(x=year,y=Value,fill=variable_na
   scale_y_continuous(expand = c(0,0))+
   theme_classic()
 
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_ren_capinv.png"),plot=plot_nza_ren_capinv,width=10,height=6,units="in",dpi=300)
 
 #Generating Capacity Chart
 nza_capacity<- nza_states %>%
