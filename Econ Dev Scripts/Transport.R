@@ -1,5 +1,10 @@
-
 #EVs
+
+# State Variable - Set this to the abbreviation of the state you want to analyze
+state_abbreviation <- "MN"  # Replace with any US state abbreviation
+state_name <- "Minnesota"  # Replace with the full name of any US state
+region_id <- us_counties %>%
+  filter(abbr == state_abbreviation) 
 
 #EV Registrations by State
 #Check for latest data here: https://afdc.energy.gov/data/categories/maps-data-categories?sort=most+recent
@@ -24,7 +29,15 @@ evs_state <- evs_state %>%
 #States include CA,CO,CT,ME,MN,MT,NJ,NM,NY,NC,OR,TN,TX,VA,VT,WA
 evs_county <- read.csv(paste0("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/",state_abbreviation,"_EV_Registrations.csv"))
 
-state_evs_county<-evs_county %>%
+#If the EV registration is by zip code
+zip_county_ev <- zip_code_db %>% 
+  filter(state == state_abbreviation) %>%
+  select(zipcode, county) %>%
+  left_join(evs_county, by=c("zipcode"="ZIP.Code")) %>%
+  left_join(region_id %>% select(fips, county), by="county")
+  
+
+state_evs_county<-zip_county_ev %>% #or just evs_county if originally by county
   group_by(State,County) %>%
   summarize(total=sum(Vehicle.Count,na.rm=T)) %>%
   left_join(county_pop %>% filter(STNAME==state_name) %>% select(CTYNAME,POPESTIMATE2022),by=c("County"="CTYNAME")) %>%
