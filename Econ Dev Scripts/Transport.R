@@ -1,5 +1,14 @@
 #EVs
 
+### INPUTS
+# Alternative Fuels Data Center EV registration counts by state and charging station locations
+# Clean Investment Monitor socioeconomic data
+# Atlas EV Hub county level EV registrations for specific states
+
+### OUTPUTS
+# evlocs per capita by EA
+# scatterplot of EV charging stations v registrations for state
+
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "MN"  # Replace with any US state abbreviation
 state_name <- "Minnesota"  # Replace with the full name of any US state
