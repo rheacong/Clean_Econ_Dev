@@ -1,7 +1,7 @@
 #Electricity Sector
 #This script is used to generate the charts and maps for the electricity sector in the US
 
-#included in this script are:
+### INPUTS
  # Operating Generation Capacity by Technology, by State, Economic Area, and County (EIA 860m data)
  # Planned Generation Capacity by Technology, by State, Economic Area, and County (EIA 860m data)
  # Renewable Electricity Generation Share by State, Economic Area, and County (EPA eGrid data)
@@ -9,7 +9,14 @@
  # Industrial Electricity Prices by State (SEDS data)
  # Industrial Electricity Expenditure by State, Economic Area, and County (NREL SLOPE data)
  # Electricity Imports and Exports by State  (SEDS Data)
- 
+
+### OUTPUTS
+# bar graphs of state operating capacity additions by year and technology
+# line graph of renewable electricity growth since 2012
+# CSV for renewable share in EA
+# column chart of emissions rate for local utility generation in region
+# map of electricity generation emissions in region
+
 
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "MT"  # Replace with any US state abbreviation
@@ -69,6 +76,11 @@ plot_elec_ann_1224<-ggplot(data=abbr_opgen_12_23,aes(x=`Operating Year`,y=`Namep
   theme_classic()+
   scale_fill_manual(values = expanded_palette)
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_op_gen_cap_annual", ".png")), 
+       plot = plot_elec_ann_1224,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #generate_ppt_with_chart(paste0("New electricity generation capacity announced in ",state_name, " since 2011"), plot_elec_ann_1224, 7)
 
@@ -149,26 +161,9 @@ states_rengen <- states_gen %>%
   mutate(rengrowth_18_23 = round(cap_index_18-100,1))
 
 
-plot_elec_2020index<-ggplot(data=states_rengen %>%
-                              filter(region == region_abbrv$region),
-                            aes(x=Year,
-                                y=cap_index_18,
-                                group=full,
-                                color=full)) +
-  geom_line(data = subset(states_rengen%>%filter(region == region_abbrv$region), full != state_name), size = 1) +  # Plot other lines
-  geom_line(data = subset(states_rengen%>%filter(region == region_abbrv$region,), full == state_name), size = 2) +
-  scale_size_identity() +
-  labs(title="Renewable Electricity Growth since 2022",
-       subtitle="Cumulative Renewable Capacity Additions since 2012, indexed to Jan 2022",
-       x="", y="Index (100=08-2020)",
-       color="State")+
-  theme_classic()+
-  scale_color_manual(values = rmi_palette)
-
+#Chart: Renewable Electricity Growth since the IRA
 region_abbrv<-states_simple %>%
   filter(abbr == state_abbreviation) 
-
-#Chart: Renewable Electricity Growth since the IRA
 plot_elec_2020index<-ggplot(data=states_rengen %>%
                               filter(region == region_abbrv$region),
                             aes(x=Year,
@@ -210,7 +205,7 @@ planned_gen_plot<-ggplot(data=abbr_plangen,aes(x=reorder(Technology,-`Nameplate 
   scale_fill_manual(values = rmi_palette)
 
 
-ggsave(file.path(output_folder, paste0("planned_gen_plot", ".png")), 
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_planned_gen_plot", ".png")), 
        plot = planned_gen_plot,
        width = 8,   # Width of the plot in inches
        height = 8,   # Height of the plot in inches
@@ -390,6 +385,9 @@ plot_data<- EA_renshare %>%
   slice_min(em_rate,n=20)
 
 #Column Chart for Emissions Rate of Utilities within EA
+duplicated <- which(duplicated(plot_data$`EA Name`)) # Some EAs were included twice in different regions
+plot_data <- plot_data[-duplicated,]
+
 plot_EA_renshare<-ggplot(data=,plot_data, aes(x=reorder(`EA Name`,-em_rate),y=em_rate,fill=region_id)) +
   geom_col(position='stack') +
   coord_flip()+
@@ -402,6 +400,11 @@ plot_EA_renshare<-ggplot(data=,plot_data, aes(x=reorder(`EA Name`,-em_rate),y=em
   theme_classic()+
   theme(legend.position="none")
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,region_abbrv$region,"_plot_emrate", ".png")), 
+       plot = plot_EA_renshare,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #Regional Emissions Generation Map
 county_map_data <- us_counties %>%
@@ -417,20 +420,23 @@ county_labels <- county_labels %>%
   filter(full %in% county_map_data$full)
 
 ren_gen_map<-ggplot() +
-  geom_polygon(data = county_map_data, aes(x = x, y = y, group = group, fill = em_rate, alpha = region_id), color = 'grey',size=0.001) +
+  geom_sf(data = county_map_data, aes(fill = em_rate, alpha = ifelse(abbr == state_abbreviation, 2, 0.5)), color = 'grey',size=0.001) +
   scale_fill_gradient2(low="#2A9D8F",mid="white",high="#E63946", midpoint=mean(EA_renshare$em_rate),na.value = "grey90", name = "Emissions Rate (lbs/Mwh)") +
   scale_alpha_identity() +
-  geom_polygon(data=us_states %>% filter(full %in% county_map_data$full),aes(x=x,y=y,group=group),color="black",fill=NA,alpha=0)+
-  geom_text(data = county_labels, aes(x = x, y = y, label = full), size = 2, color = "black", fontface = "bold") +
-  labs(title = paste("Electricity Generation Emissions in ", str_to_sentence(multi_region_id$region)," States"), 
+  #geom_sf(data=region_map,color="black",fill=NA,alpha=NA,size=20)+
+  geom_sf(data = us_states %>% filter(abbr == state_abbreviation), color = "black", fill = NA, size = 100, alpha=0.5) +
+  #geom_text(data = county_labels, size = 2, color = "black", fontface = "bold") +
+  labs(title = paste("Electricity Generation Emissions in ", str_to_sentence(multi_region_id$region)," States"),
        subtitle = "",
        fill = "Location Quotient",
        caption = "Source: EPA, eGrid2022") +
-  theme_void() 
-#theme(legend.position = c(0.9, 0.1),
-#     plot.background = element_rect(fill = "white", color = "white"),
-#    panel.background = element_rect(fill = "white", color = "white"))
+  theme_void()
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,region_abbrv$region,"_ren_gen_map", ".png")), 
+       plot = ren_gen_map,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #Industrial Electricity Prices
 
@@ -453,7 +459,7 @@ industrial_exp_plot<-ggplot(data=region_industrial,aes(x=Year,y=exp_cons,group=S
   theme_classic()+
   scale_color_manual(values = rmi_palette)
 
-ggplot(data=region_industrial,aes(x=Year,y=Expenditure.US.Dollars,fill=Source)) +
+ind_energy_exp <- ggplot(data=region_industrial,aes(x=Year,y=Expenditure.US.Dollars,fill=Source)) +
   geom_col(position='stack') +
   labs(title=paste0("Industrial Energy Expenditure in ",region_name, "out to 2050"), 
        subtitle="Modelled based on 2016 data",
@@ -464,6 +470,11 @@ ggplot(data=region_industrial,aes(x=Year,y=Expenditure.US.Dollars,fill=Source)) 
   theme_classic()+
   scale_fill_manual(values = rmi_palette)
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_ind_energy_exp_2050", ".png")), 
+       plot = ind_energy_exp,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #Electricity Price in Industrial Sector - SEDS Data
 seds_all <- read.csv('https://www.eia.gov/state/seds/sep_update/Complete_SEDS_update.csv') #NB: BIG file
@@ -515,6 +526,12 @@ industrial_prices_plot<-ggplot() +
   scale_y_continuous(expand = c(0,0))+
   scale_color_manual(values = expanded_palette)
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_ind_prices_plot", ".png")), 
+       plot = industrial_prices_plot,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+
 industrial_exp_gdp_plot<-ggplot() +
   geom_line(data=seds_elec_pric_ind %>%
               filter(Division == region_division$Division,
@@ -535,6 +552,12 @@ industrial_exp_gdp_plot<-ggplot() +
   scale_x_continuous(expand = c(0,0))+
   scale_color_manual(values = expanded_palette)
 
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_ind_exp_gdp_plot", ".png")), 
+       plot = industrial_exp_gdp_plot,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+
 #Electricity Imports & Exports
 seds_elec_impexp <- seds_all %>%
   filter(MSN %in% c("ELIMV", #Electricity import expenditure
@@ -548,7 +571,7 @@ seds_elec_impexp <- seds_all %>%
   select(Region,Division,State,StateCode,Year,ELEXV,ELIMV,net_exp,net_exp_gdp)
 
 
-industrial_exp_gdp_plot<-ggplot() +
+industrial_net_exp_plot<-ggplot() +
   geom_line(data=seds_elec_impexp %>%
               filter(Division == region_division$Division,
                      StateCode != state_abbreviation),aes(x=Year,y=net_exp,group=StateCode,color=StateCode), size = 1) +  # Plot other lines
@@ -566,6 +589,11 @@ industrial_exp_gdp_plot<-ggplot() +
   scale_x_continuous(expand = c(0,0))+
   scale_color_manual(values = expanded_palette)
 
+ ggsave(file.path(output_folder, paste0(state_abbreviation,"_ind_net_exp_plot", ".png")), 
+       plot = industrial_net_exp_plot,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #Renewable Production by State
 msn_descriptions <- data.frame(
