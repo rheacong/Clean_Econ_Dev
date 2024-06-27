@@ -6,6 +6,20 @@
 #3. Clean Energy Facility announcement before/after IRA within Region
 #4. Announced Investments by Segment, Technology within States, Economic Areas and MSAs
 
+### INPUTS
+# Clean Investment Monitor quarterly actual investment, manufacturing energy and industry facility data, socioeconomics
+# CIM tax investments by category and state
+# EIA Annual Electric Generator Report
+
+### OUTPUTS
+# map of US state investment specialization
+# bar plot of state investment by industry
+# bar plot of clean energy manufacturing in region since IRA
+# announced manufacturing investment by state in csv
+# solar, wind, batteries subcategories pre/post IRA
+# bar plots of IRA investment by states in region and division by tax credit
+
+
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "NM"  # Replace with any US state abbreviation
 state_name <- "New Mexico"  # Replace with the full name of any US state
@@ -273,6 +287,7 @@ plot_manufacturing<-ggplot(data=state_man,aes(x=reorder(State,-Total_Facility_CA
   scale_fill_manual(values = expanded_palette)+
   scale_y_continuous(expand=c(0,0))
 
+ggsave(paste0(output_folder,"/manufacturing_since_IRA.png"), plot = plot_manufacturing, width = 8, height = 6, dpi = 300)
 
 #ANNOUNCED INVESTMENT
 #All Manufacturing Facilities
@@ -853,12 +868,39 @@ state_ira_plot<-ggplot(data=state_ira) +
         plot.background = element_rect(fill = "white", color = "white"),
         panel.background = element_rect(fill = "white", color = "white")) 
 
-  
-
-ggsave(file.path(output_folder, paste0(state_abbreviation,"_state_ira_plot", ".png")), 
+ggsave(file.path(output_folder, paste0(state_abbreviation,division_of_interest$Division,"_states_ira_plot", ".png")), 
        plot = state_ira_plot,
        width = 8,   # Width of the plot in inches
        height = 8,   # Height of the plot in inches
        dpi = 300)
-  
-  
+
+#Compare by regional divisions
+division2_of_interest<-states_simple %>%
+  filter(region==region_abbrv$region)
+
+state_ira2 <- state_estimates2 %>%
+  left_join(states_simple,by=c("State"="abbr")) %>%
+  filter(region == division2_of_interest$region) 
+
+state_ira_plot2<-ggplot(data=state_ira2) +
+  geom_col(aes(x=reorder(State,-`Federal Investment (% of State GDP)`),y=`Federal Investment (% of State GDP)`,fill=Category),position="stack") +
+  #coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = paste("Federal IRA Investment in the ",region_abbrv$region," Division by Tax Credit"),
+       subtitle = "Percentage of 2022 GDP",
+       x="State",
+       fill = "Tax Credit",
+       caption="Source: Clean Investment Monitor")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.8),
+        plot.background = element_rect(fill = "white", color = "white"),
+        panel.background = element_rect(fill = "white", color = "white")) 
+
+
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,region_abbrv$region,"_states_ira_plot", ".png")), 
+       plot = state_ira_plot2,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
