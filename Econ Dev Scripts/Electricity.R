@@ -620,12 +620,20 @@ seds_ren_prod <- seds_all %>%
   left_join(msn_descriptions,by=c("MSN"="MSN")) %>%
   select(Region,Division,State,StateCode,Year,MSN, Description, Data)
 
+#Plot can change region/division of interest, or by state
 seds_ren_prod_plot<-ggplot(data=seds_ren_prod %>%
-                             filter(), aes(x=Year,y=Data,fill=variable_name)) +
+                             filter(MSN %in% c("REACB","RECCB","REEIB","REICB","RERCB"),State == state_name), aes(x=Year,y=Data,fill=Description)) +
   geom_col(position='stack') +
   scale_fill_manual(values = expanded_palette)+
-  labs(title=paste("Job Creation in", region_name,",",state_abbreviation, "in a Net Zero Scenario"), 
-       x="Year", y="Jobs",
-       caption="Source: Net Zero America (2021), Princeton University") +
+  labs(title=paste("Consumption of Renewable Energy Sources in", state_name), 
+       x="Year", y="Consumption, billion Btu",
+       caption="Source: EIA") +
   scale_y_continuous(expand = c(0,0))+
   theme_classic()
+
+write.csv(seds_ren_prod, file = "./MN/MN_seds_red_prod_jobs")
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_job_creation_net_zero", ".png")), 
+       plot = seds_ren_prod_plot,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
