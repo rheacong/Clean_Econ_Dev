@@ -137,6 +137,30 @@ state_EA_table<-EA_table_5 %>%
 write.csv(state_EA_table,paste0(output_folder,"/",state_abbreviation,"_EA_table.csv"),row.names=F)
 
 
+#MSA Feasibility
+msa_table_5<-feasibility %>%
+  filter(region=="MSA",
+         transition_sector_category %in% c("Transition Mineral and Metal Mining Sector",
+                                           "Industrial End-Use Sector",
+                                           "Transition Chemical, Mineral, and Metal Manufacturing Sector",
+                                           "Buildings End-Use Sector",
+                                           "Transportation End-Use Sector",
+                                           "Transition Enabling Sector" 
+                                           )) %>%
+  mutate(MSA_Name=gsub(" \\(MSA\\)","",msa_name)) %>%
+  group_by(state_avb,MSA_Name) %>%
+  slice_max(feas_industry_percentile,n=5) %>%
+  mutate(rank=rank(-feas_industry_percentile)) %>%
+  select(MSA_Name,naics_desc,rank) %>%
+  pivot_wider(names_from = rank, values_from = naics_desc,
+              values_fn = list(naics_desc = function(x) paste(x, collapse = "; "))) 
+
+state_MSA_table<-msa_table_5 %>%
+  filter(state_avb ==state_abbreviation)
+
+write.csv(state_EA_table,paste0(output_folder,"/",state_abbreviation,"_EA_table.csv"),row.names=F)
+
+
 #MSA Variables
 EA_ranks<-msa_data %>%
   filter(region=="EA") %>%
