@@ -454,3 +454,77 @@ gjf_meaningful_1923 <- gjf %>%
   arrange(desc(subs_share))
 
 
+#State Taxes
+library(rvest)
+library(purrr)
+# URL of the page
+url <- "https://www.ncsl.org/fiscal/state-tax-actions-database"
+
+# Read the HTML content of the page
+webpage <- read_html(url)
+
+# Extract tables from the webpage
+tables <- html_table(webpage, fill = TRUE)
+
+# Assuming `tables` is your list of data frames
+years <- 2023:2015  # Create a vector of years from 2023 to 2015
+
+# Add a 'year' column to each table and rbind them
+combined_data <- purrr::map2_df(tables, years, ~ mutate(.x, year = .y))
+
+combined_data <- combined_data %>%
+  mutate(State=ifelse(is.na(State),Jurisdiction,State))%>%
+  mutate(State=ifelse(is.na(State),Juridiction,State))%>%
+  mutate(`Revenue Type`=ifelse(is.na(`Revenue Type`),Type,`Revenue Type`)) %>%
+  mutate(total=ifelse(is.na(`FY 2024 (millions)`),`FY 2023 (millions)`,
+                      ifelse(is.na(`FY 2023 (millions)`),`Fiscal Year 2022`,
+                             ifelse(is.na(`Fiscal Year 2022`),`Fiscal Year 2021`,`FY 2024 (millions)`)))) %>%
+  mutate(total=as.numeric(gsub("[^0-9.]", "", total))) 
+
+#Climate Taxes
+
+keywords<- c("carbon","climate","emission",
+             "greenhouse","renewable","solar","wind",
+             "energy","fuel","gas","electric","vehicle",
+             "EV","transportation","manufacturing","job","jobs","oil")
+pattern <- paste0("\\b(", paste(keywords, collapse = "|"), ")\\b")
+
+climate_taxes <- combined_data %>%
+  filter(grepl(pattern, Description, ignore.case = TRUE)) %>%
+  filter(!Description %in% c("Revenue Total=",
+                             "Tax Revenue=",
+                             "Non-Tax Revenue=",
+                             "Non-Tax Revenue =")) 
+
+write.csv(climate_taxes ,"C:/Users/LCarey.RMI/Downloads/climate_taxes.csv")
+
+nm_clim_taxchanges<-climate_taxes %>%
+  filter(State=="New Mexico")
+
+sc_clim_taxchanges<-climate_taxes %>%
+  filter(State=="South Carolina")
+
+
+
+#Climate/Clean ENergy/Manufacturing Incentive Policies
+
+dev_pol <- read.csv("C:/Users/LCarey.RMI/OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/dbo_Program.csv")
+
+climate_dev_pol <- dev_pol %>%
+  filter(grepl(pattern, ProgramDescription, ignore.case = TRUE))
+
+climate_dev_pol_sum<-climate_dev_pol %>%
+  filter(Program_Status=="Active")%>%
+  group_by(State) %>%
+  summarize_at(vars(Program_Name),n_distinct) 
+ggplot(data=climate_dev_pol_sum, aes(x=reorder(State,Program_Name),y=Program_Name)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Climate/Clean Energy/Manufacturing Incentive Policies",
+       x = "Program Description",
+       y = "Count") +
+  theme_classic()
+
+
+state_climate_pol <- climate_dev_pol %>%
+  filter(State==state_name)
