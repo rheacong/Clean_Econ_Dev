@@ -109,9 +109,7 @@ ggsave(paste0(output_folder,"/",state_abbreviation,"_directemit_lq_plot.png"),pl
 
 
 #Industry Energy Intensity
-asm_vars<-listCensusMetadata("timeseries/asm",
-                             vintage=2021,
-                             type="variables")
+
 asm_2021 <- getCensus(
   name = "timeseries/asm/area2017",
   vars=c("STATE",
