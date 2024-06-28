@@ -3,6 +3,7 @@
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "NM"  # Replace with any US state abbreviation
 state_name <- "New Mexico"  # Replace with the full name of any US state
+region_abbrv <- states_simple %>% filter(abbr == state_abbreviation)
 
 #Set the Working Directory to your Username and update output folder for saved charts etc
 setwd("C:/Users/LCarey.RMI/")
@@ -249,13 +250,13 @@ dev.off()
 
 #For Clean Energy Industries
 clean_gdpind<-gdp_ind %>%
-  left_join(eti %>% 
-              select(`3-Digit Code`,`Transition Sector Category`) %>%
+  left_join(eti_long %>% 
+              select(`3-Digit Code`,`Sector`) %>%
               mutate(naics3=as.character(`3-Digit Code`)),by=c("IndustryClassification"="naics3")) %>%
-  left_join(eti %>% 
-              select(`2-Digit Code`,`Transition Sector Category`) %>%
+  left_join(eti_long %>% 
+              select(`2-Digit Code`,`Sector`) %>%
               mutate(naics2=as.character(`2-Digit Code`)),by=c("IndustryClassification"="naics2")) %>%
-  mutate(sector=ifelse(is.na(`Transition Sector Category.x`),`Transition Sector Category.y`,`Transition Sector Category.x`)) %>%
+  mutate(sector=ifelse(is.na(`Sector.x`),`Sector.y`,`Sector.x`)) %>%
   filter(!is.na(sector)) %>%
   distinct(GeoName,IndustryClassification,Description,X2023,gdp_growth_1722,sector)
 
