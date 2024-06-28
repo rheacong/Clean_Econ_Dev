@@ -54,12 +54,12 @@ investment_year<-investment %>%
 #Total Investment by Segment,Year
 investment_year_segment<-investment %>%
   mutate(year=as.numeric(substr(quarter,1,4))) %>%
-  group_by(quarter,Segment) %>%
+  group_by(year,Segment) %>%
   summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
   mutate(Segment = recode(Segment, "energyandindustry" = "Energy & Industry",
                           "manufacturing" = "Manufacturing",
                           "retail" = "Retail")) %>%
-  pivot_wider(names_from=quarter,values_from=Estimated_Actual_Quarterly_Expenditure) #wide format for Datwrapper
+  pivot_wider(names_from=year,values_from=Estimated_Actual_Quarterly_Expenditure) #wide format for Datwrapper
 
 #Investment by Segment
 investment_segment<-investment %>%
@@ -243,8 +243,17 @@ plot_invgdp<- ggplot(data=states_investment_gdp_2123 %>%
 ggsave(paste0(output_folder,"/state_investment_gdp.png"), plot = plot_invgdp, width = 8, height = 6, dpi = 300)
 
 #Clean Energy Manufacturing since IRA within Region
+state_man_total <- investment %>%
+  mutate(post_IRA = ifelse(quarter %in% c("2022-Q3","2022-Q4","2023-Q1","2023-Q2","2023-Q3","2023-Q4","2024-Q1"),1,0)) %>%
+  filter(Segment=="Manufacturing",
+         post_IRA=="1") %>%
+  group_by(State) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  mutate(share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)*100) %>%
+  ungroup()
+
 region_abbrv<-states_simple %>%
-  filter(abbr == "WA") 
+  filter(abbr == state_abbreviation) 
 
 state_man <- facilities %>%
   left_join(states_simple,by=c("State"="abbr") ) %>%
@@ -275,7 +284,7 @@ plot_manufacturing<-ggplot(data=state_man,aes(x=reorder(State,-Total_Facility_CA
   scale_fill_manual(values = expanded_palette)+
   scale_y_continuous(expand=c(0,0))
 
-
+ggsave(paste0(output_folder,"/",state_abbreviation,"_manufacturing.png"),plot=plot_manufacturing,width=8,height=6,units="in",dpi=300)
 #ANNOUNCED INVESTMENT
 #All Manufacturing Facilities
 facilities_man<-facilities %>%
