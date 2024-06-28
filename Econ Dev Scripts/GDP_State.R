@@ -3,7 +3,6 @@
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "NM"  # Replace with any US state abbreviation
 state_name <- "New Mexico"  # Replace with the full name of any US state
-region_abbrv <- states_simple %>% filter(abbr == state_abbreviation)
 
 #Set the Working Directory to your Username and update output folder for saved charts etc
 setwd("C:/Users/LCarey.RMI/")
@@ -251,14 +250,20 @@ dev.off()
 #For Clean Energy Industries
 clean_gdpind<-gdp_ind %>%
   left_join(eti_long %>% 
-              select(`3-Digit Code`,`Sector`) %>%
+              select(`3-Digit Code`,Sector) %>%
               mutate(naics3=as.character(`3-Digit Code`)),by=c("IndustryClassification"="naics3")) %>%
   left_join(eti_long %>% 
-              select(`2-Digit Code`,`Sector`) %>%
+              select(`2-Digit Code`,Sector) %>%
               mutate(naics2=as.character(`2-Digit Code`)),by=c("IndustryClassification"="naics2")) %>%
-  mutate(sector=ifelse(is.na(`Sector.x`),`Sector.y`,`Sector.x`)) %>%
+  mutate(sector=ifelse(is.na(Sector.x),Sector.y,Sector.x)) %>%
   filter(!is.na(sector)) %>%
-  distinct(GeoName,IndustryClassification,Description,X2023,gdp_growth_1722,sector)
+  distinct(GeoName,IndustryClassification,Description,X2021,X2022,X2023,gdp_growth_1722,gdp_growth_1823,sector) %>%
+  mutate(gdp_2122=1-X2022/X2021)
+
+
+state_cleangdp<-clean_gdpind %>%
+  filter(GeoName==state_name) %>%
+  
 
 state_lq_clean <-state_lq %>%
   filter(Description %in% clean_gdpind$Description) 
@@ -266,9 +271,9 @@ state_lq_dirty<-state_lq %>%
   filter(!(Description %in% clean_gdpind$Description))
 
 state_lq_clean_plot<-ggplot() +
-  geom_point(data=state_lq_dirty,aes(x=LQ,y=gdp_growth_1722,size=X2023),color='grey',alpha=0.5) +
-  geom_point(data=state_lq_clean,aes(x=LQ,y=gdp_growth_1722,size=X2023,fill=label),shape=21,color="black",stroke=0.5,alpha=0.75) +
-  geom_text_repel(data=state_lq_clean,aes(x=LQ,y=gdp_growth_1722,label = paste(Description,"= ", round(gdp_growth_1722,0),"% growth.")), 
+  geom_point(data=state_lq_dirty,aes(x=LQ,y=gdp_growth_1823,size=X2023),color='grey',alpha=0.5) +
+  geom_point(data=state_lq_clean,aes(x=LQ,y=gdp_growth_1823,size=X2023,fill=label),shape=21,color="black",stroke=0.5,alpha=0.75) +
+  geom_text_repel(data=state_lq_clean,aes(x=LQ,y=gdp_growth_1823,label = paste(Description,"= ", round(gdp_growth_1823,0),"% growth.")), 
                   box.padding = 0.2, 
                   point.padding = 0.2, 
                   segment.color = 'grey',
@@ -279,7 +284,7 @@ state_lq_clean_plot<-ggplot() +
        y="GDP Growth (17-22)", x="Location Quotient",
        caption="Source: BEA, Clean Growth Tool") +
   geom_vline(xintercept = 1,color='darkgrey') +
-  geom_hline(yintercept= weighted.mean(state_lq$gdp_growth_1722,w=state_lq$X2023) ,color='darkgrey') +
+  geom_hline(yintercept= weighted.mean(state_lq$gdp_growth_1823,w=state_lq$X2023) ,color='darkgrey') +
   theme_classic()+
   scale_fill_manual(values = rmi_palette)+
   scale_size(range = c(3, 20)) +  # Controlling the size of the bubbles
@@ -290,6 +295,19 @@ ggsave(file.path(output_folder, paste0(state_abbreviation,"_state_lq_clean_plot"
        width = 8,   # Width of the plot in inches
        height = 8,   # Height of the plot in inches
        dpi = 300)
+
+
+#State 3-Digit Clean Energy Industries
+
+state_lq_clean <-state_lq_3 %>%
+  left_join(clean_gdpind %>% select(GeoName,Description,sector,X2021,gdp_2122),by=c("GeoName","Description")) %>%
+  mutate(gdp_contr=gdp_growth_1722/100*X2022) %>%
+  group_by(sector) %>%
+  summarize_at(vars(X2022,gdp_contr),sum,na.rm=T) %>%
+  ungroup() %>%
+  mutate(gdp_share=X2022/sum(X2022),
+         gdp_contr_share=gdp_contr/sum(gdp_contr)) 
+  
 
 #Clean Location Quotients
 gdp_proportions_clean <- clean_gdpind %>%

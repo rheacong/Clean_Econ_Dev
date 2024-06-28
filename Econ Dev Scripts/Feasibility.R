@@ -35,11 +35,23 @@ feasibility<-naics_data %>%
 #State Average
 ea_pop <- county_pop %>%
   select(STATE,COUNTY,POPESTIMATE2022) %>%
-  mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY))) %>%
+  mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY)),
+         fip=as.numeric(FIPS)) %>%
   left_join(EAs,by=c("FIPS"="FIPS")) %>%
   filter(!is.na(County)) %>%
   select(fips,County,`EA Name`,POPESTIMATE2022) %>%
   group_by(`EA Name`) %>%
+  summarize_at(vars(POPESTIMATE2022),sum,na.rm=T) %>%
+  arrange(desc(POPESTIMATE2022))
+
+msa_pop <- county_pop %>%
+  select(STATE,COUNTY,POPESTIMATE2022) %>%
+  mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY)),
+         fips=as.numeric(FIPS)) %>%
+  left_join(county_cbsa,by=c("fips"="fips")) %>%
+  #filter(!is.na(County)) %>%
+  select(fips,CBSA.Title,POPESTIMATE2022) %>%
+  group_by(CBSA.Title) %>%
   summarize_at(vars(POPESTIMATE2022),sum,na.rm=T) %>%
   arrange(desc(POPESTIMATE2022))
 
@@ -58,26 +70,36 @@ state_feas <- feasibility %>%
   mutate(feas_industry_percentile=percent_rank(density)) %>%
   left_join(state_totals,by=c("state_avb"="state_avb","naics_desc"="naics_desc") )
 
-state_feas_plot<-ggplot(data=state_feas %>% filter(state_avb==state_abbreviation,
+state_feas_msa <- feasibility %>%
+  mutate(MSA_Name=gsub(" \\(MSA\\)","",msa_name)) %>%
+  left_join(msa_pop,by=c("MSA_Name"="CBSA.Title")) %>%
+  filter(region=="MSA") %>%
+  group_by(state_avb,transition_sector_category,naics_desc) %>%
+  summarize(across(c(density,pci,share_good_jobs),
+                   ~weighted.mean(.x,w=POPESTIMATE2022,na.rm=T))) %>%
+  group_by(naics_desc) %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  left_join(state_totals,by=c("state_avb"="state_avb","naics_desc"="naics_desc") )
+
+state_feas_plot<-ggplot(data=state_feas_msa %>% filter(state_avb==state_abbreviation,
                                                    !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
                                                                                       "Transition Enabling Sector",
                                                                                       "Transition Forestry, Land, and Agriculture (FLAG) Sector")),
        aes(x=feas_industry_percentile,y=pci,color=transition_sector_category,size=jobs))+
-  geom_vline(xintercept = mean(state_feas$feas_industry_percentile),color='darkgrey') +
+  #geom_vline(xintercept = mean(state_feas$feas_industry_percentile),color='darkgrey') +
   geom_hline(yintercept= mean(state_feas$pci) ,color='darkgrey') +
   geom_point()+
   scale_color_manual(values=expanded_palette)+
-  geom_text_repel(aes(label=ifelse(feas_industry_percentile>mean(state_feas$feas_industry_percentile) &
-                                     pci > mean(state_feas$pci),naics_desc,"")),size=2, max.overlaps = 10)+
+  geom_text_repel(aes(label=naics_desc),size=2, max.overlaps = 10)+
   theme_classic()+
   labs(title=paste0("Feasibility of Clean Growth Sectors in ",state_name),
-       subtitle=paste0("High Complexity Clean Energy Industries for which ",state_name," has above-average transition feasibility.", "\n", "Size of bubble represents number of jobs in the sector"),
+       subtitle=paste0("Clean Energy Industry Transition Feasibility in ",state_name,".", "\n", "Size of bubble represents number of jobs in the sector"),
        x="Feasibility",
        y="Complexity",
        color="Sector",
        caption="Source: RMI, Clean Growth Tool")+
-  xlim(0.4,1)+
-  ylim(0,7)+
+  #xlim(0.4,1)+
+  #ylim(0,7)+
   theme(plot.title = element_text(face = "bold"),
         legend.position = "right",
         legend.text = element_text(size = 4),   # Decrease text size
@@ -88,11 +110,12 @@ state_feas_plot<-ggplot(data=state_feas %>% filter(state_avb==state_abbreviation
 
 ggsave(paste0(output_folder,"/",state_abbreviation,"_feasibility.png"),plot=state_feas_plot,width=8,height=6,units="in",dpi=300)
 
-state_feas_plot2<-ggplot(data=state_feas%>% filter(state_avb==state_abbreviation,
+state_feas_plot2<-ggplot(data=state_feas_msa %>% filter(state_avb==state_abbreviation,
                                  !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
                                                                     "Transition Enabling Sector",
-                                                                    "Transition Forestry, Land, and Agriculture (FLAG) Sector"),
-                                 feas_industry_percentile>mean(state_feas$feas_industry_percentile)),
+                                                                    "Transition Forestry, Land, and Agriculture (FLAG) Sector")) %>%
+                           group_by(state_avb) %>%
+                                   slice_max(order_by=feas_industry_percentile,n=10),
        aes(x=reorder(naics_desc,feas_industry_percentile),y=feas_industry_percentile,fill=transition_sector_category))+
   scale_y_continuous(expand=c(0,0))+
   geom_col()+
@@ -113,6 +136,82 @@ state_feas_plot2<-ggplot(data=state_feas%>% filter(state_avb==state_abbreviation
         legend.spacing = unit(0.2, "cm"))
 
 ggsave(paste0(output_folder,"/",state_abbreviation,"_feasibility_industry.png"),plot=state_feas_plot2,width=8,height=6,units="in",dpi=300)
+
+
+#NAICS Code Feasibility
+feasibility_naics<-naics_data %>%
+  select(transition_sector_category_id,naics,naics_desc) %>%
+  right_join(transition,by=c("transition_sector_category_id"="transition_sector_category_id")) %>%
+  select(transition_sector_category,naics,naics_desc) %>%
+  inner_join(naics_msa_data,by=c("naics"="naics")) %>%
+  filter(aggregation_level=="3") %>%
+  left_join(states_msa,by=c("msa"="cbsa")) %>%
+  left_join(msa_data %>%
+              select(region,msa,msa_name),by=c("msa"="msa")) %>%
+  select(statefp,state_name,state_avb,region,msa,msa_name,transition_sector_category, naics,naics_desc,density,pci,rca,jobs,jobs_l5,share_good_jobs,percent_change_jobs_l5) %>%
+  group_by(naics,naics_desc) %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  distinct()
+
+#State Average
+ea_pop <- county_pop %>%
+  select(STATE,COUNTY,POPESTIMATE2022) %>%
+  mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY))) %>%
+  left_join(EAs,by=c("FIPS"="FIPS")) %>%
+  filter(!is.na(County)) %>%
+  select(fips,County,`EA Name`,POPESTIMATE2022) %>%
+  group_by(`EA Name`) %>%
+  summarize_at(vars(POPESTIMATE2022),sum,na.rm=T) %>%
+  arrange(desc(POPESTIMATE2022))
+
+state_naics_totals <- feasibility_naics %>%
+  group_by(state_avb,naics_desc) %>%
+  summarize_at(vars(jobs),sum,na.rm=T)
+
+state_feas_naics <- feasibility_naics %>%
+  mutate(EA_Name=gsub(" \\(EA\\)","",msa_name)) %>%
+  left_join(ea_pop,by=c("EA_Name"="EA Name")) %>%
+  filter(region=="EA",
+         EA_Name != "Phoenix-Mesa-Scottsdale, AZ") %>%
+  group_by(state_avb,transition_sector_category,naics_desc) %>%
+  summarize(across(c(density,pci,share_good_jobs),
+                   ~weighted.mean(.x,w=POPESTIMATE2022,na.rm=T))) %>%
+  group_by(naics_desc) %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  left_join(state_naics_totals,by=c("state_avb"="state_avb","naics_desc"="naics_desc") ) %>%
+  #left_join(eti_long %>% select(Subsector,`4-Digit Description`),by=c("naics_desc"="4-Digit Description")) %>%
+  distinct()
+
+
+state_feasnaics_plot<-ggplot(data=state_feas_naics %>% filter(state_avb==state_abbreviation,
+                                                   !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                                                      #"Transition Enabling Sector",
+                                                                                      "Transition Forestry, Land, and Agriculture (FLAG) Sector")),
+                        aes(x=density,y=pci,color=transition_sector_category,size=jobs))+
+  geom_vline(xintercept = mean(state_feas$density),color='darkgrey') +
+  geom_hline(yintercept= mean(state_feas$pci) ,color='darkgrey') +
+  geom_point()+
+  scale_color_manual(values=expanded_palette)+
+  geom_text_repel(aes(label=ifelse(feas_industry_percentile> 0,naics_desc,"")),size=2, max.overlaps = 10)+
+  theme_classic()+
+  labs(title=paste0("Feasibility of Clean Growth Sectors in ",state_name),
+       subtitle=paste0("High Complexity Clean Energy Industries for which ",state_name," has above-average transition feasibility.", "\n", "Size of bubble represents number of jobs in the sector"),
+       x="Feasibility",
+       y="Complexity",
+       color="Sector",
+       caption="Source: RMI, Clean Growth Tool")+
+  #xlim(0.4,1)+
+  #ylim(0,7)+
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 4),   # Decrease text size
+        legend.title = element_text(size = 5),  # Decrease title size
+        legend.key.size = unit(0.3, "cm"),      # Decrease key size
+        legend.spacing = unit(0.2, "cm")) +
+  guides(size = "none")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_feasibility.png"),plot=state_feas_plot,width=8,height=6,units="in",dpi=300)
+
 
 #EA Feasibility
 EA_table_5<-feasibility %>%

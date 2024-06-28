@@ -44,8 +44,6 @@ state_evs_county<-zip_county_ev %>% #or just evs_county if originally by county
   mutate(ev_cap=total/POPESTIMATE2022) 
 
 
-
-
 #EV Charging Stations, by State
 url <-'https://afdc.energy.gov/files/docs/historical-station-counts.xlsx?year=2023'
 dest_file <- tempfile(fileext = ".xlsx")
