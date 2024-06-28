@@ -1,12 +1,14 @@
 #Net Zero America Downscaling
 
 # State Variable - Set this to the abbreviation of the state you want to analyze
-state_abbreviation <- "MT"  # Replace with any US state abbreviation
-state_name <- "Montana"  # Replace with the full name of any US state
+state_abbreviation <- "NM"  # Replace with any US state abbreviation
+state_name <- "New Mexico"  # Replace with the full name of any US state
 region_name <- "Great Falls, MT"
 
-#Set the Working Directory to your Username
+
+#Set the Working Directory to your Username and update output folder for saved charts etc
 setwd("C:/Users/LCarey.RMI/")
+output_folder <- paste0("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Slide Decks/States/",state_abbreviation)
 
 
 
@@ -173,7 +175,7 @@ nza_states<-nzap %>%
   filter(scenario %in% c("REF","E+","E+RE+")) %>%
   drop_na(value) %>%
   filter(geo != "national") %>%
-  group_by(year,geo,State.Code,scenario,filter_level_1,filter_level_2,filter_level_3,variable_name,unit) %>%
+  group_by(year,geo,State.Code,scenario,filter_level_1,filter_level_2,filter_level_3,variable_name,unit,unit_alt,unit_alt_equation) %>%
   summarize_at(vars(value),sum) %>%
   spread(year,value) %>%
   filter(!is.na(State.Code)) %>%
@@ -186,7 +188,7 @@ nza_jobs_econ <- nza_states %>%
   filter(filter_level_2=="Jobs",
          filter_level_3=="By economic sector") %>%
   mutate(variable_name=gsub("By economic sector - ","",variable_name)) %>%
-  select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
+  select(State.Code,variable_name,unit,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
   pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value") %>%
   mutate(code=case_when(
     variable_name=="Agriculture"~"11",
@@ -205,17 +207,21 @@ nza_jobs_region <- nza_jobs_econ %>%
   mutate(Value=Value*share) 
 
 
-plot_nza_jobs_econ<-ggplot(data=nza_jobs_region, aes(x=year,y=Value,fill=variable_name)) +
+plot_nza_jobs_econ<-ggplot(data=nza_jobs_econ, aes(x=year,y=Value,fill=variable_name)) +
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
   scale_fill_manual(values = expanded_palette)+
-  labs(title=paste("Job Creation in", region_name,",","in a Net Zero Scenario"), 
+  labs(title=paste0("Job Creation in ", state_name,","," in Net Zero Scenarios"), 
        x="Year", y="Jobs",
        fill="Economic Sector",
-       caption="Source: Net Zero America (2021), Princeton University") +
+       caption="Source: Net Zero America (2021), Princeton University \n
+       Note: REF = Reference Scenario, E+ = High Electrification Scenario, E+RE+ = 100% Renewable Energy Scenario",
+       ) +
   scale_y_continuous(expand = c(0,0))+
   theme_classic()+
   theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_jobs_econ.png"),plot=plot_nza_jobs_econ,width=8,height=6,units="in",dpi=300)
 
 #Jobs by Resource Sector
 nza_jobs_resource <- nza_states %>%
@@ -231,17 +237,21 @@ nza_jobs_resource_region <- nza_jobs_resource %>%
   mutate(Value=Value*region_totalemp$share) 
 
 
-plot_nza_jobs_resource<-ggplot(data=nza_jobs_resource_region, aes(x=year,y=Value,fill=variable_name)) +
+plot_nza_jobs_resource<-ggplot(data=nza_jobs_resource, aes(x=year,y=Value,fill=variable_name)) +
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
   scale_fill_manual(values = expanded_palette)+
-  labs(title=paste("Job Creation in", region_name,",","in a Net Zero Scenario"), 
+  labs(title=paste("Job Creation in", state_name,",","in a Net Zero Scenario"), 
        x="Year", y="Jobs",
        fill="Resource Sector",
-       caption="Source: Net Zero America (2021), Princeton University") +
+       caption="Source: Net Zero America (2021), Princeton University \n
+       Note: REF = Reference Scenario, E+ = High Electrification Scenario, E+RE+ = 100% Renewable Energy Scenario",
+  ) +
   scale_y_continuous(expand = c(0,0))+
   theme_classic()+
   theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_jobs_resource.png"),plot=plot_nza_jobs_resource,width=8,height=6,units="in",dpi=300)
 
 
 #Capital Invested in Electricity Generation Chart
@@ -264,14 +274,18 @@ plot_nza_ren_capinv<-ggplot(data=nza_cap_inv,aes(x=year,y=Value,fill=variable_na
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
   scale_fill_manual(values = expanded_palette)+
-  labs(title=paste("Capital invested in ", region_name, "in electricity generation in a Net Zero Scenario"),
-       subtitle = "Downscaled investment figures based on existing share of statewide electricity capacity additions.",
-       x="Year", y="Billion $ 2018",
-       caption="Source: Net Zero America (2021), Princeton University") +
+  labs(title=paste("Additional Capital invested in ", state_name, "in electricity generation in a Net Zero Scenario"),
+       #subtitle = "Downscaled investment figures based on existing share of statewide electricity capacity additions.",
+       x="Year", 
+       y="Billion $ 2018",
+       fill="Electricity Technology",
+       caption="Source: Net Zero America (2021), Princeton University \n
+       Note: REF = Reference Scenario, E+ = High Electrification Scenario, E+RE+ = 100% Renewable Energy Scenario") +
   scale_y_continuous(expand = c(0,0))+
-  theme_classic()
+  theme_classic()+
+  theme(legend.position="bottom")
 
-
+ggsave(paste0(output_folder,"/",state_abbreviation,"_cap_inv.png"),plot=plot_nza_ren_capinv,width=8,height=6,units="in",dpi=300)
 #Generating Capacity Chart
 nza_capacity<- nza_states %>%
   filter(State.Code==state_abbreviation) %>%
@@ -317,17 +331,20 @@ nza_final_energyuse <- nza_states %>%
   mutate(share=region_eleccons$share) %>%
   mutate(Value_region=Value*share) 
 
-plot_nza_finalenergyuse<-ggplot(data=nza_final_energyuse,aes(x=year,y=Value_region,fill=variable_name)) +
+plot_nza_finalenergyuse<-ggplot(data=nza_final_energyuse,aes(x=year,y=Value,fill=variable_name)) +
   geom_col(position='stack') +
   facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
   scale_fill_manual(values = expanded_palette)+
-  labs(title=paste("Final Energy Use in", region_name, "in Different Scenarios"),
+  labs(title=paste("Final Energy Use in", state_name, "in Different Scenarios"),
        subtitle = "Downscaled investment figures based on existing share of statewide electricity consumption",
        x="Year", y="PJ",
-       caption="Source: Net Zero America (2021), Princeton University") +
+       caption="Source: Net Zero America (2021), Princeton University \n
+       Note: REF = Reference Scenario, E+ = High Electrification Scenario, E+RE+ = 100% Renewable Energy Scenario") + 
   scale_y_continuous(expand = c(0,0))+
   theme_classic()+
   theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_final_energyuse.png"),plot=plot_nza_finalenergyuse,width=8,height=6,units="in",dpi=300)
 
 #Energy Production
 nza_energy_production<- nzap %>%
@@ -373,4 +390,29 @@ ggsave(file.path(output_folder, paste0(state_abbreviation,"_plot_nza_energyprod"
        dpi = 300)
 
 
+
+#Cumulative Avoided premature deaths
+nza_avoideddeaths <- nza_states %>%
+  filter(State.Code==state_abbreviation) %>%
+  filter(grepl("Cumulative avoided premature deaths from air pollution",variable_name)) %>%
+  mutate(variable_name=gsub("Cumulative avoided premature deaths from air pollution - ","",variable_name)) %>%
+  ungroup() %>%
+  select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
+  pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value")
+
+plot_nza_avoideddeaths<-ggplot(data=nza_avoideddeaths %>% filter(scenario=="E+"),aes(x=year,y=Value,fill=variable_name)) +
+  geom_col(position='stack') +
+  #facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette)+
+  labs(title=paste("Cumulative Avoided Deaths in", state_name, "in a Net Zero Scenario"),
+       #subtitle = "Downscaled investment figures based on existing share of statewide electricity consumption",
+       x="Year", y="Avoided Deaths",
+       fill= "Pollution Source",
+       caption="Source: Net Zero America (2021), Princeton University \n
+       Note: REF = Reference Scenario, E+ = High Electrification Scenario, E+RE+ = 100% Renewable Energy Scenario") + 
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()+
+  theme(legend.position="right")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"plot_nza_avoideddeaths.png"),plot=plot_nza_avoideddeaths,width=8,height=6,units="in",dpi=300)
 
