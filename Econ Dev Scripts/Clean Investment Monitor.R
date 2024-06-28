@@ -35,7 +35,7 @@ tech_mapping <- data.frame(
   Technology = c("Batteries", "Solar", "Critical Minerals", "Fueling Equipment", "Zero Emission Vehicles", "Electrolyzers", "Storage", "Wind", "Hydrogen", "SAF", "Storage", "Nuclear", "Solar", "Wind"),
   tech = c("Batteries & Components", "Solar Energy Components", "Low-Carbon Minerals", "Low-Carbon Industrial Equipment", "Electric Vehicles", "Low-Carbon Industrial Equipment", "Batteries & Components", "Wind Energy Components", "Green Hydrogen", "Biofuels", "Energy Utility Systems", "Nuclear Electric Power", "Solar Electric Power", "Wind Electric Power")
 )
-
+tech_mapping_left_join(tech_mapping,eti_long %>% select(Sector,Subsector,Technology,`6-Digit Code`,`6-Digit Description`),by=c("tech"="Technology"))
 tech_mapping<-left_join(tech_mapping,naics2022 %>% select("2022 NAICS Code",
                                                           "2022 NAICS Title",
                                                           "2017 NAICS Code"),
@@ -153,6 +153,8 @@ plot_quarterly_inv<-ggplot(data=states_investment_quarterly %>%
   scale_fill_manual(values = rmi_palette)+
   scale_y_continuous(expand=c(0,0))
 
+ggsave(paste0(output_folder,"/",state_abbreviation,"_quarterly_inv.png"),plot=plot_quarterly_inv,width=8,height=6,units="in",dpi=300)
+
 #pre and Post IRA
 state_inv_ira<-states_investment_quarterly %>%
   mutate(post_IRA = ifelse(year_quarter>"2022-08-15",1,0)) %>%
@@ -242,7 +244,7 @@ ggsave(paste0(output_folder,"/state_investment_gdp.png"), plot = plot_invgdp, wi
 
 #Clean Energy Manufacturing since IRA within Region
 region_abbrv<-states_simple %>%
-  filter(abbr == state_abbreviation) 
+  filter(abbr == "WA") 
 
 state_man <- facilities %>%
   left_join(states_simple,by=c("State"="abbr") ) %>%
@@ -250,7 +252,7 @@ state_man <- facilities %>%
          year=substr(date,1,4),
          post_IRA = ifelse(date>"2022-08-15",1,0)) %>%
   filter(Segment=="Manufacturing",
-         region %in% region_abbrv$region,
+         region.x %in% region_abbrv$region,
          post_IRA=="1") %>%
   group_by(State,Technology) %>%
   summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T) %>%

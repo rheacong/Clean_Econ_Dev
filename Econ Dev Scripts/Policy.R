@@ -80,8 +80,8 @@ write.csv(state_fedinv_map,paste0(output_folder,"/",state_abbreviation,"_state_f
 
 
 #Federal Tax Credit Incentives State-Level Estimates
-tax_inv_cat<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_category.csv',skip=2)
-tax_inv_state<-read.csv('C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_state.csv',skip=2)
+tax_inv_cat<-read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_category.csv',skip=2)
+tax_inv_state<-read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/clean_investment_monitor_q1_24/tax_investment_by_state.csv',skip=2)
 
 #45X
 fac_45x<-facilities %>%
@@ -266,6 +266,112 @@ state_ira <- state_estimates2 %>%
   
   
 
+  
+  
+  
+  
+  
+  
+#RMI Economic Tides Analysis - June 18 Data
+  # Load necessary library
+library(readxl)
+
+# List of state abbreviations
+state_abbreviations <- c("AL", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY")
+
+# Initialize an empty list to store data frames
+data_frames <- list()
+
+# Loop through each state abbreviation
+for (state_abbr in state_abbreviations) {
+  # Construct the file path
+  file_path <- paste0('OneDrive - RMI/Documents - US Program/6_Projects/Sprint24/Analysis/IRA Downscaling/IRA Funding to states_ econ tides 2.0/June 18 data/ira_econ_tides/', state_abbr, '/Allstates_IRA/Allstates_IRA.xlsx')
+  
+  # Read the Excel file (assuming the data is on sheet 9)
+  data <- read_excel(file_path, sheet = 9)
+  
+  # Add a new column with the state abbreviation
+  data$State <- state_abbr
+  
+  # Append the data frame to the list
+  data_frames[[state_abbr]] <- data
+}
+
+# Combine all data frames into one
+ira_allstates <- do.call(rbind, data_frames)
+
+#clean Superfund
+ira_allstates <- ira_allstates %>%
+  select(State,Sector,Section,Provision,`CBO National Estimate ($)`,`CBO Downscaled State Estimate ($)`,`Climate-Aligned Estimate ($)`) 
+
+superfund_clean<-ira_allstates %>%
+  filter(Provision=="Superfund") %>%
+  mutate(state_share=`CBO Downscaled State Estimate ($)`/`CBO National Estimate ($)`,
+         national2=as.numeric("12411000000"),
+         superfund=national2*state_share) %>%
+    select(State,superfund,national2)
+
+ira_allstates <- ira_allstates %>%
+  left_join(superfund_clean, by = "State") %>%
+  mutate(
+    `CBO National Estimate ($)` = if_else(Provision == "Superfund", national2, `CBO National Estimate ($)`),
+    `CBO Downscaled State Estimate ($)` = if_else(Provision == "Superfund", superfund, `CBO Downscaled State Estimate ($)`),
+    `Climate-Aligned Estimate ($)` = if_else(Provision == "Superfund", superfund, `Climate-Aligned Estimate ($)`)
+  ) %>%
+  select(-superfund,-national2)  # Remove the temporary superfund column after update
+
+#Clean 45X
+ira_allstates <- ira_allstates %>%
+  mutate(`Climate-Aligned Estimate ($)`=if_else(Provision=="Advanced Manufacturing Production Credit",`Climate-Aligned Estimate ($)`*0.6,`Climate-Aligned Estimate ($)`))
+ira_allstates <-ira_allstates %>%
+  mutate(`Climate-Aligned Estimate ($)`=if_else(Provision=="Advanced Manufacturing Production Credit" & State=="NM",`Climate-Aligned Estimate ($)`/0.6/1.3*1.2,`Climate-Aligned Estimate ($)`))
+#Clean Energy Efficient Home Credit
+ira_allstates <- ira_allstates %>%
+  mutate(`Climate-Aligned Estimate ($)`=if_else(`Climate-Aligned Estimate ($)`<0,`CBO Downscaled State Estimate ($)`,`Climate-Aligned Estimate ($)`))
+
+#Totals relative to population/gdp
+sum_ira_allstates<-ira_allstates %>%
+  group_by(State) %>%
+  summarize_at(vars(`CBO National Estimate ($)`,`CBO Downscaled State Estimate ($)`,`Climate-Aligned Estimate ($)`),sum,na.rm=T) %>%
+  ungroup() %>%
+  left_join(socioecon %>% filter(quarter=="2024-Q1") %>% select(State,StateName,population),by=c("State"="State")) %>%
+  left_join(state_gdp,by=c("StateName"="GeoName")) %>%
+  mutate(
+    cbo_cap = `CBO Downscaled State Estimate ($)` / population,
+    climate_cap = `Climate-Aligned Estimate ($)` / population
+  ) %>%
+  mutate(
+    cbp_gdp = `CBO Downscaled State Estimate ($)` /(X2022*1000000),
+    climate_gdp= `Climate-Aligned Estimate ($)` /(X2022*1000000)
+  ) %>%
+  mutate(across(c(`CBO Downscaled State Estimate ($)`,`Climate-Aligned Estimate ($)`),~round(./1000000000,3))) %>%
+  
+  select(State,`CBO Downscaled State Estimate ($)`,`Climate-Aligned Estimate ($)`,cbo_cap,climate_cap,cbp_gdp,climate_gdp,population,X2022)
+
+
+#State of Interest largest IRA Provisions
+state_abbr_ira <- ira_allstates %>%
+  filter(State == state_abbreviation) %>%
+  arrange(desc(`Climate-Aligned Estimate ($)`)) %>%
+  mutate(across(where(is.numeric), ~round(./1000000000, 3))) %>%
+  mutate(share = `Climate-Aligned Estimate ($)` / sum(`Climate-Aligned Estimate ($)`))
+
+
+state_10ira_plot <- ggplot(data=state_abbr_ira %>% slice_max(order_by=`Climate-Aligned Estimate ($)`,n=10)) +
+  geom_col(aes(x=reorder(Provision,`Climate-Aligned Estimate ($)`),y=`Climate-Aligned Estimate ($)`,fill=Sector),position="stack") +
+  coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = "Top 10 IRA Provisions in New Mexico in a Climate-Aligned Scenario", 
+       subtitle = "",
+       x="Provision",
+       y="Climate-Aligned Estimate ($b)",
+       fill = "Sector",
+       caption="Source: RMI, June 2024 Update")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.2)) 
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_ira_provisions.png"),plot=state_10ira_plot,width=8,height=6,units="in",dpi=300)
 
 
 #State Climate and Clean Energy Policy

@@ -22,7 +22,7 @@ years <- 1997:2023
 year_cols <- paste0("X", years)
 gdp_ind <- gdp_ind %>%
   mutate(across(all_of(year_cols), ~ as.numeric(gsub(",", "", .)))) %>%
-  mutate(gdp_growth_1722 = (X2022 - X2017) / X2017 * 100) 
+  mutate(gdp_growth_1823 = (X2023 - X2018) / X2018 * 100) 
 
 #Filter for 'All industry total'
 gdp_state_total<-gdp_ind %>%

@@ -9,15 +9,17 @@
  # Industrial Electricity Prices by State (SEDS data)
  # Industrial Electricity Expenditure by State, Economic Area, and County (NREL SLOPE data)
  # Electricity Imports and Exports by State  (SEDS Data)
- 
+
+#Set the Working Directory to your Username and update output folder for saved charts etc
+setwd("C:/Users/LCarey.RMI/")
+output_folder <- paste0("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Slide Decks/States/",state_abbreviation)
 
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "MT"  # Replace with any US state abbreviation
 state_name <- "Montana"  # Replace with the full name of any US state
 region_name <- "Great Falls, MT"
 
-#Set the Working Directory to your Username
-setwd("C:/Users/LCarey.RMI/")
+
 
 #If necessary, Create Relevant Downscaling file by county and/or Economic Area
 great_falls<-EAs %>%
@@ -46,7 +48,7 @@ region_counties<-us_counties %>%
 
 #State Operating Generation Capacity
 #EIA Generation Capacity Data - Check it's the latest month available
-url <- 'https://www.eia.gov/electricity/data/eia860m/xls/march_generator2024.xlsx'
+url <- 'https://www.eia.gov/electricity/data/eia860m/xls/april_generator2024.xlsx'
 destination_folder<-'OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/States Data/'
 file_path <- paste0(destination_folder, "eia_op_gen.xlsx")
 downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
@@ -54,26 +56,133 @@ downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
 #Operating Generation
 op_gen <- read_excel(file_path, sheet = 1,skip=2)
 
+#State-Level
 abbr_opgen_12_23 <- op_gen %>%
-  filter(`Plant State`== state_abbreviation & `Operating Year` > 2011) %>%
+  filter(`Plant State`== state_abbreviation,
+         `Operating Year` > 2011) %>%
   mutate(Technology = ifelse(grepl("Natural Gas", Technology), "Natural Gas", Technology)) %>%
   filter(Technology != "Flywheels" & Technology != "All Other" & Technology != "Other Gases" & Technology != "Wood/Wood Waste Biomass" & Technology != "Pumped Storage" & Technology != "Wood and Wood Derived Fuels") 
 
+#Region-Level
+counties <- counties(class = "sf")
+op_gen_clean <- op_gen %>% 
+  filter(!is.na(Latitude) & !is.na(Longitude))
+op_gen_sf <- st_as_sf(op_gen_clean, coords = c("Longitude", "Latitude"), crs = 4326)
+op_gen_sf <- st_transform(op_gen_sf, crs = st_crs(counties))
+
+op_gen_with_county <- st_join(op_gen_sf, counties)
+
+EA_gen <- op_gen_with_county %>%
+  mutate(fips=as.numeric(GEOID)) %>%
+  inner_join(EAs,by=c("fips"="fips")) %>%
+  filter(Status=="(OP) Operating") %>%
+  group_by(region,full,`EA Name`,`Operating Year`,Technology) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) 
+
+region_rengen <- EA_gen %>%
+  as.data.frame(.) %>%
+  filter(region %in% region_counties$region) %>%
+  mutate(tech = case_when(
+    Technology=="Natural Gas Steam Turbine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combined Cycle" ~ "Natural Gas",
+    Technology=="Natural Gas Internal Combustion Engine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combustion Turbine" ~ "Natural Gas",
+    Technology=="Conventional Steam Coal" ~ "Coal",
+    Technology=="Conventional Hydroelectric" ~ "Hydro",
+    Technology=="Onshore Wind Turbine" ~ "Wind",
+    Technology=="Batteries" ~ "Storage",
+    Technology=="Solar Photovoltaic" ~ "Solar",
+    Technology=="Solar Thermal with Energy Storage" ~ "Solar",
+    Technology=="Hydroelectric Pumped Storage" ~ "Hydro",
+    Technology=="Geothermal" ~ "Geothermal",
+    Technology=="Wood/Wood Waste Biomass"~"Biomass"
+  )) %>%
+  group_by(full,`EA Name`, tech) %>%
+  summarize(`Nameplate Capacity (MW)` = sum(`Nameplate Capacity (MW)`, na.rm = TRUE)) 
+#complete(`Operating Year` = 2013:2024, fill = list(`Nameplate Capacity (MW)` = 0)) %>%
+#mutate(Year = make_date(`Operating Year`)) %>%
+
+rengen_share <- region_rengen %>%
+  mutate(region_of_interest=ifelse(`EA Name`==region_name,1,0)) %>%
+  filter(full==state_name) %>%
+  group_by(tech) %>%
+  mutate(share=round(`Nameplate Capacity (MW)`/sum(`Nameplate Capacity (MW)`),1)) 
 
 
-#Chart: Operating Generation Capacity by Technology, annual additions 
+
+
+
+#State Chart: Operating Generation Capacity by Technology, annual additions 
 plot_elec_ann_1224<-ggplot(data=abbr_opgen_12_23,aes(x=`Operating Year`,y=`Nameplate Capacity (MW)`,fill=Technology)) +
   geom_col(position='stack') +
-  labs(title="Operating Generation Capacity Additions by Technology", 
+  labs(title=paste("Operating Generation Capacity Additions by Technology in",state_name), 
        x="Year", y="Nameplate Capacity (MW)") +
   theme_classic()+
+  scale_y_continuous(expand=c(0,0))+
   scale_fill_manual(values = expanded_palette)
 
+ggsave(file.path(output_folder,"/",state_abbreviation, paste0("plot_elec_ann_1224", ".png")), 
+       plot = plot_elec_ann_1224,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
-#generate_ppt_with_chart(paste0("New electricity generation capacity announced in ",state_name, " since 2011"), plot_elec_ann_1224, 7)
 
+#Region Chart: Operating Generation Capacity by Technology, annual additions
+region_rencap<-op_gen_with_county %>%
+  as.data.frame(.) %>%
+  filter(GEOID %in% region_counties$fips,
+         `Operating Year` > 2011) %>%
+  mutate(roi=region_name) %>%
+  mutate(tech = case_when(
+    Technology=="Natural Gas Steam Turbine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combined Cycle" ~ "Natural Gas",
+    Technology=="Natural Gas Internal Combustion Engine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combustion Turbine" ~ "Natural Gas",
+    Technology=="Conventional Steam Coal" ~ "Coal",
+    Technology=="Conventional Hydroelectric" ~ "Hydro",
+    Technology=="Onshore Wind Turbine" ~ "Wind",
+    Technology=="Batteries" ~ "Storage",
+    Technology=="Solar Photovoltaic" ~ "Solar",
+    Technology=="Solar Thermal with Energy Storage" ~ "Solar",
+    Technology=="Hydroelectric Pumped Storage" ~ "Hydro",
+    Technology=="Geothermal" ~ "Geothermal",
+    Technology=="Wood/Wood Waste Biomass"~"Biomass"
+  )) %>%
+  group_by(roi, tech,`Operating Year`) %>%
+  summarize(`Nameplate Capacity (MW)` = sum(`Nameplate Capacity (MW)`, na.rm = TRUE)) 
+
+
+#Region Chart: Operating Generation Capacity by Technology, annual additions 
+plot_region_elec_ann_1224<-ggplot(data=region_rencap,aes(x=`Operating Year`,y=`Nameplate Capacity (MW)`,fill=tech)) +
+  geom_col(position='stack') +
+  labs(title=paste("Operating Generation Capacity Additions by Technology in",region_name), 
+       x="Year", y="Nameplate Capacity (MW)") +
+  theme_classic()+
+  scale_y_continuous(expand=c(0,0))+
+  scale_fill_manual(values = expanded_palette)
+
+ggsave(file.path(output_folder,"/",state_abbreviation, paste0("plot_elec_ann_1224", ".png")), 
+       plot = plot_elec_ann_1224,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #Generation Map
+
+usa <- st_as_sf(maps::map("state", fill=TRUE, plot =FALSE))
+state_map_data<-usa %>%
+  filter(ID==str_to_lower(state_name))
+state_sf<-st_as_sf(state_map_data,coords=c("x","y"),crs=4326)
+bbox<-st_bbox(state_sf)
+bbox_named <- c(left = bbox["xmin"],
+                bottom = bbox["ymin"],
+                right = bbox["xmax"],
+                top = bbox["ymax"])
+names(bbox_named) <- c("left", "bottom", "right", "top")
+
+base_map <- get_map(location = bbox_named, maptype = "terrain", source = "google")
+
 # Plot the bubble map
 map_elec_cap<-ggmap(base_map, darken = c(0.5, "white")) +
   # State boundaries
@@ -94,6 +203,12 @@ map_elec_cap<-ggmap(base_map, darken = c(0.5, "white")) +
   geom_sf(data = state_map_data, inherit.aes = FALSE, color = "darkgray", fill = NA) + 
   theme_void()+
   theme(legend.position="bottom")
+
+ggsave(file.path(output_folder, paste0("map_elec_cap", ".png")), 
+       plot = map_elec_cap,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 #generate_ppt_with_chart(paste0("New electricity generation capacity announced in ",state_name, " since 2011"), map_elec_cap, 8)
 
@@ -183,7 +298,7 @@ plot_elec_2020index<-ggplot(data=states_rengen %>%
        x="", y="Index (100=08-2020)",
        color="State")+
   theme_classic()+
-  scale_color_manual(values = rmi_palette)
+  scale_color_manual(values = expanded_palette)
 
 ggsave(file.path(output_folder, paste0("plot_elec_2020index", ".png")), 
        plot = plot_elec_2020index,
@@ -232,7 +347,7 @@ abbr_tech_share <- op_gen %>%
 #County Plant-Level Generation
 
 
-#NREL SLOPE Data - Energy COnsumption by County and Region
+#NREL SLOPE Data - Energy Consumption by County and Region
 
 #Read in the NREL SLOPE Data
 county_elec_cons <- read.csv("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/energy_consumption_expenditure_business_as_usual_county.csv")
@@ -252,8 +367,17 @@ county_eleccons <- county_elec_cons %>% #filter for 2022 and electricity consump
   mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY))) %>%
   left_join(EAs,by=c("FIPS"="FIPS")) %>% #for Economic Areas
   left_join(county_cbsa,by=c("fips"="fips")) %>% #For Metropolitan Statistical Areas
-  right_join(census_divisions,by=c("State.Name"="State")) %>% #For Census Divisions
-  select(Region,Division,State.Code,State.Name,County,`EA Name`,CBSA.Title,FIPS,fips,Consumption.MMBtu)
+  right_join(census_divisions,by=c("full"="State")) %>% #For Census Divisions
+  select(Region,Division,abbr,full,County,`EA Name`,CBSA.Title,FIPS,fips,Consumption.MMBtu)
+
+county_elecgdp <- county_eleccons %>%
+  left_join(county_gdp,by=c("fips"="fips")) %>%
+  left_join(county_pop %>%
+              select(CTYNAME,POPESTIMATE2022),by=c("County"="CTYNAME")) %>%
+  mutate(across(c(X2022,POPESTIMATE2022),as.numeric,na.rm=T)) %>%
+  mutate(gdp_per_cap=X2022/POPESTIMATE2022,
+         elec_cap=Consumption.MMBtu/POPESTIMATE2022) 
+
 
 msa_eleccons <- county_eleccons %>% #group by MSA
   group_by(CBSA.Title) %>%
@@ -350,7 +474,7 @@ weighted_sum_func <- function(x, w) {
 }
 
 
-#SUmmarize at Economiic Area Level
+#SUmmarize at Economic Area Level
 opr_eas <- matched %>%
   mutate(fips=as.numeric(GEOID)) %>%
   left_join(EAs,by=c("fips"="fips")) %>%
@@ -402,7 +526,33 @@ plot_EA_renshare<-ggplot(data=,plot_data, aes(x=reorder(`EA Name`,-em_rate),y=em
   theme_classic()+
   theme(legend.position="none")
 
+ggsave(file.path(output_folder, paste0("plot_EA_renshare", ".png")), 
+       plot = plot_EA_renshare,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
+#Region's Utilities Emissions Rates
+plot_utilities <- ggplot(data=opr_eas %>%
+  filter(`EA Name` %in% multi_region_id$`EA Name`),aes(x=reorder(`OPRNAME`,-ren_mix),y=ren_mix,fill=NAME.x)) +
+    geom_col(position='stack') +
+    coord_flip()+
+    scale_fill_manual(values = expanded_palette)+
+    labs(title=paste("Non-hydro renewables generation share of utilities across the region"),
+         subtitle = "Non-hydro renewables share",
+         x="", y="%",
+         caption="Source: EPA, eGrid 2022") +
+    scale_y_continuous(expand = c(0,0))+
+    theme_classic()+
+    theme(legend.position="right")
+  
+  ggsave(file.path(output_folder, paste0("plot_utilities_renshare", ".png")), 
+         plot = plot_utilities,
+         width = 8,   # Width of the plot in inches
+         height = 8,   # Height of the plot in inches
+         dpi = 300)
+  
+  
 #Regional Emissions Generation Map
 county_map_data <- us_counties %>%
   left_join(EAs %>% select(`EA Name`,FIPS,region),by=c("fips"="FIPS"))%>%
