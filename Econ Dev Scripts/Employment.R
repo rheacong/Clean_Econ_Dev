@@ -51,7 +51,8 @@ cbp21_2d <- cbp_21 %>%
   filter(INDLEVEL=="2")  %>%
   mutate(FIPS=paste0(STATE, COUNTY)) %>%
   left_join(EAs,by=c("FIPS"="FIPS")) %>%
-  left_join(naics2017 %>% select(`2017 NAICS US   Code`,`2017 NAICS US Title`),by=c("NAICS2017"="2017 NAICS US   Code")) %>%
+  left_join(naics2017 %>% mutate(naics2017=as.numeric(`2017 NAICS US   Code`)) %>%
+                                   select(naics2017,`2017 NAICS US Title`),by=c("NAICS2017"="naics2017")) %>%
   rename(naics_desc=`2017 NAICS US Title`)
 
 #Filter just for region of interest
@@ -71,9 +72,9 @@ region_totalemp<-region_cbp_2d %>%
 
 #Calculate proportions
 total_emp <- cbp21_2d %>%
-  filter(NAICS2017=="00")
+  filter(NAICS2017=="0")
 total_emp_nat<-cbp21_2d  %>%
-  filter(NAICS2017=="00") %>%
+  filter(NAICS2017=="0") %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
   ungroup() 
 
@@ -120,7 +121,8 @@ fossil_emp_map <- fossil_emp_county %>%
 
 #Fossil Fuel Employment-Map
 us_counties<-us_map("counties")
-fossil_map_data <- inner_join(us_counties, fossil_emp_map, by = c("fips" = "FIPS"))
+fossil_map_data <- left_join(us_counties %>%
+                               filter(full==state_name), fossil_emp_map, by = c("fips" = "FIPS"))
 fossil_map_data <- fossil_map_data %>%
   mutate(across(where(is.numeric), ~ifelse(is.na(.), 0, .))) %>%
   mutate(lq_bin=cut(lq, breaks = c(-1, 1, 5, 20, 100), labels = c("Below Average (0-1)","Above Average (1-5)", "High (5-20)", "Very High (20+)"))) 
@@ -160,33 +162,38 @@ fossil_emp_state <- fossil_emp_county %>%
 
 #Diversity
 emp_proportions <- cbp21_2d %>%
-  left_join(total_emp %>% select(state,county,full,NAME,EMP), by = c("NAME"="NAME","full"="full","state"="state","county"="county","GEOID"="GEOID"), suffix = c("", "_total")) %>%
-  select(GEOID,state,county,full,NAME,NAICS2017,naics_desc,EMP,EMP_total) %>%
-  group_by(GEOID,state,county,full,NAME,NAICS2017,naics_desc) %>%
+  left_join(total_emp %>% select(STATE,COUNTY,full,EMP), by = c("full"="full","STATE"="STATE","COUNTY"="COUNTY"), suffix = c("", "_total")) %>%
+  mutate(FIPS=paste0(STATE,COUNTY))%>%
+  select(FIPS,full,SECTOR,EMP,EMP_total) %>%
+  group_by(FIPS,full,SECTOR) %>%
+  filter(SECTOR != "00") %>%
   mutate(emp_share=EMP/EMP_total) %>%
   filter(!is.na(full)) %>%
-  arrange(desc(emp_share))
+  arrange(desc(emp_share)) %>%
+  distinct()
 
 # National-level proportions
 national_proportions <- emp_proportions %>%
   ungroup() %>%
-  select(NAICS2017, naics_desc, EMP) %>%
-  group_by(NAICS2017, naics_desc) %>%
+  select(SECTOR, EMP) %>%
+  filter(SECTOR != "00") %>%
+  group_by(SECTOR) %>%
   summarize_at(vars(EMP),sum,na.rm=T) %>%
   ungroup()%>%
   mutate(emp_share_national = EMP / sum(EMP, na.rm = TRUE))
 
 #Location Quotients
 location_quotients_county <- emp_proportions %>%
-  left_join(national_proportions, by = c("NAICS2017"="NAICS2017","naics_desc"="naics_desc")) %>%
+  left_join(national_proportions, by = c("SECTOR")) %>%
+  filter(SECTOR != "00") %>%
   mutate(LQ = emp_share / emp_share_national,
          weighted_LQ = LQ * emp_share)  # Weighting by regional share
 
 # Compute the Hachman index
 hachman_indices_county <- location_quotients_county %>%
   filter(full==state_name) %>%
-  mutate(region_id=ifelse(GEOID %in% region_counties$fips,1,0)) %>% # Identify the region of interest
-  group_by(NAME,GEOID,region_id) %>%
+  #mutate(region_id=ifelse(GEOID %in% region_counties$fips,1,0)) %>% # Identify the region of interest
+  group_by(FIPS) %>%
   summarize(HI = 100 / sum(weighted_LQ, na.rm = TRUE), .groups = 'drop') %>% # Reciprocal of the sum of weighted LQs scaled by 100
   mutate(HI_bin = cut(HI, breaks = c(0, 50,60,70,80,90, 100), labels = c("Very Low (0-50)","Low (50-60)", "Low-Medium (60-70)","Medium-High (70-80)", "High (80-90)", "Very High (90-100)")))
 
@@ -195,27 +202,33 @@ hachman_indices_county <- location_quotients_county %>%
 
 # Get US county map data
 
-county_map_data <- inner_join(us_counties, hachman_indices_county, by = c("fips" = "GEOID"))
+county_map_data <- inner_join(us_counties, hachman_indices_county, by = c("fips" = "FIPS"))
 county_map_data <- county_map_data %>%
   mutate(alpha = ifelse(region_id == 1, 1, 0.5))
 
 county_labels<-centroid_labels(regions = c("counties"))
 county_labels <- county_labels %>%
-  inner_join(hachman_indices_county,by=c("fips"="GEOID"))
+  inner_join(hachman_indices_county,by=c("fips"="FIPS"))
 
 hachman_map_county_d<-ggplot() +
-  geom_polygon(data = county_map_data, aes(x = x, y = y, group = group, fill = HI_bin, alpha = alpha), color = "grey") +
-  geom_text(data = county_labels, aes(x = x, y = y, label = NAME), size = 2, color = "white", fontface = "bold") +
-  scale_fill_manual(values = rmi_palette, na.value = "grey90", name = "Hachman Index") +
+  geom_polygon(data = county_map_data, aes(x = x, y = y, group = group, fill = HI), color = "white") +
+  geom_text(data = county_labels, aes(x = x, y = y, label = county), size = 2, color = "white", fontface = "bold") +
+  scale_fill_gradient(low="#F8931D",high="#0989B1", na.value = "grey90", name = "Hachman Index") +
   scale_alpha_identity() +
   labs(title = paste("Economic Diversity within ", state_name), 
        subtitle = "A Hachman Index score ranges from 0 to 100. A higher score indicates that the subject area's industrial distribution more closely resembles that of the US as a whole, and is therefore diverse.",
        fill = "Hachman Index",
        caption = "Source: Census Bureau, County Business Patterns") +
   theme_void() +
-  theme(legend.position = c(0.9, 0.1),
+  theme(legend.position = "right",
         plot.background = element_rect(fill = "white", color = "white"),
         panel.background = element_rect(fill = "white", color = "white"))
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_hachman_map_county", ".png")), 
+       plot = hachman_map_county_d,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
 
 
 #Quarterly Census of Employment and Wages
