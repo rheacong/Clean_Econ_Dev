@@ -1,7 +1,9 @@
 #Generic Setup for CRED analysis
 
-#Set the Working Directory to your Username
+
+#Set the Working Directory to your Username and update output folder for saved charts etc
 setwd("C:/Users/LCarey.RMI/")
+output_folder <- paste0("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Slide Decks/States/",state_abbreviation)
 
 
 
@@ -81,9 +83,8 @@ state_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Reg
 msa_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/msa_gdp_2022.csv',skip=3)
 states_simple <- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/US Maps etc/Regions/rmi_regions.csv')
 county_cbsa<-read.csv("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/US Maps etc/Regions/csa_cbsa_county.csv",skip=2)
-county_cbsa<-county_cbsa %>%
-  mutate(fips=as.numeric(paste0(FIPS.State.Code,FIPS.County.Code))) 
-
+county_cbsa <- county_cbsa %>%
+  mutate(fips = as.numeric(paste0(FIPS.State.Code, sprintf("%03d", as.numeric(FIPS.County.Code)))))
 county_pop<-read.csv('https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv')
 
 EAs<-read_excel("RMI/US Program - Regional Investment Strategies/Great Lakes Investment Strategy/Reference Data/BEA Economic Areas and Counties.xls",2)

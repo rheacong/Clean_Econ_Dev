@@ -198,7 +198,13 @@ download.file(url, destfile = dest_file, mode = "wb")
 
 data <- read_excel(dest_file)
 
-rooftop_state<-read_excel("C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/small_scale_solar_2024.xlsx",sheet=1,skip=2)
+
+#EIA Generation
+url<-'https://www.eia.gov/electricity/data/eia861m/archive/xls/small_scale_solar_2023.xlsx'
+dest_file <- tempfile(fileext = ".xlsx")
+download.file(url, destfile = dest_file, mode = "wb")
+
+rooftop_state <- read_excel(dest_file,sheet=3,skip=2)
 rooftop_state <- rooftop_state %>%
   rename_with(~c("res_cap",
                  "com_cap",
@@ -210,6 +216,8 @@ rooftop_state <- rooftop_state %>%
                  "total_gen"), .cols = 5:12) %>%
   mutate(across(c(res_cap:total_gen),as.numeric))
 
+
+#EPA Data
 epa_state <- read_excel("C:/Users/LCarey.RMI/OneDrive - RMI/Documents/Data/Raw Data/eGrid2022_data.xlsx",sheet=5, skip=1)
 epa_state <- epa_state %>%
   select(PSTATABB,FIPSST,STNAMEPCAP,STNGENAN,STGENATH)

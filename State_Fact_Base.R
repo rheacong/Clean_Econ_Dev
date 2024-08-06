@@ -104,7 +104,7 @@ state_manpay <- state_man_2021 %>%
 state_gdp<- read.csv('OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/state_gdp_22.csv',skip=3)
 state_gdp_17_22 <- state_gdp %>%
   mutate(gdp_17_22 = round((X2022-X2017)/X2017*100,1)) %>%
-  select(GeoName,gdp_17_22)
+  select(GeoName,X2022,gdp_17_22)
 
 #CNBC Business rankings
 cnbc <- read.csv("OneDrive - RMI/Documents - US Program/6_Projects/Clean Regional Economic Development/ACRE/Data/Raw Data/cnbc_bus_rankings.csv")

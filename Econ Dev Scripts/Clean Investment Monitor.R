@@ -35,7 +35,7 @@ tech_mapping <- data.frame(
   Technology = c("Batteries", "Solar", "Critical Minerals", "Fueling Equipment", "Zero Emission Vehicles", "Electrolyzers", "Storage", "Wind", "Hydrogen", "SAF", "Storage", "Nuclear", "Solar", "Wind"),
   tech = c("Batteries & Components", "Solar Energy Components", "Low-Carbon Minerals", "Low-Carbon Industrial Equipment", "Electric Vehicles", "Low-Carbon Industrial Equipment", "Batteries & Components", "Wind Energy Components", "Green Hydrogen", "Biofuels", "Energy Utility Systems", "Nuclear Electric Power", "Solar Electric Power", "Wind Electric Power")
 )
-
+tech_mapping_left_join(tech_mapping,eti_long %>% select(Sector,Subsector,Technology,`6-Digit Code`,`6-Digit Description`),by=c("tech"="Technology"))
 tech_mapping<-left_join(tech_mapping,naics2022 %>% select("2022 NAICS Code",
                                                           "2022 NAICS Title",
                                                           "2017 NAICS Code"),
@@ -54,12 +54,12 @@ investment_year<-investment %>%
 #Total Investment by Segment,Year
 investment_year_segment<-investment %>%
   mutate(year=as.numeric(substr(quarter,1,4))) %>%
-  group_by(quarter,Segment) %>%
+  group_by(year,Segment) %>%
   summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
   mutate(Segment = recode(Segment, "energyandindustry" = "Energy & Industry",
                           "manufacturing" = "Manufacturing",
                           "retail" = "Retail")) %>%
-  pivot_wider(names_from=quarter,values_from=Estimated_Actual_Quarterly_Expenditure) #wide format for Datwrapper
+  pivot_wider(names_from=year,values_from=Estimated_Actual_Quarterly_Expenditure) #wide format for Datwrapper
 
 #Investment by Segment
 investment_segment<-investment %>%
@@ -130,6 +130,7 @@ top_technologies <-investment %>%
 
 #Quarterly Investment by State and Industry
 states_investment_quarterly <- investment %>%
+  filter(!Subcategory %in% c("Power - Natural Gas", "Power - Coal","Natural gas processing")) %>% #filter out Carbon Management categories we don't like
   mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology)) %>%
   left_join(socioecon,by=c("State"="State","quarter"="quarter")) %>%
   left_join(top_technologies, by = c("State", "industry")) %>%
@@ -152,10 +153,19 @@ plot_quarterly_inv<-ggplot(data=states_investment_quarterly %>%
   scale_fill_manual(values = rmi_palette)+
   scale_y_continuous(expand=c(0,0))
 
+ggsave(paste0(output_folder,"/",state_abbreviation,"_quarterly_inv.png"),plot=plot_quarterly_inv,width=8,height=6,units="in",dpi=300)
+
+#pre and Post IRA
+state_inv_ira<-states_investment_quarterly %>%
+  mutate(post_IRA = ifelse(year_quarter>"2022-08-15",1,0)) %>%
+  group_by(State,post_IRA,industry) %>%
+  summarize_at(vars(Value,inv_gdp),sum,na.rm=T)
+
 
 #Investment Location Quotient - i.e. specialization in investment by State
 #National
 investment_gdp_2123<- investment %>%
+  filter(!Subcategory %in% c("Power - Natural Gas", "Power - Coal","Natural gas processing")) %>% #filter out Carbon Management categories we don't like
   rename(Value=Estimated_Actual_Quarterly_Expenditure) %>%
   mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology),
          year_quarter = yq(quarter)) %>%
@@ -170,12 +180,15 @@ investment_gdp_2123<- investment %>%
 
 #State
 states_investment_gdp_2123 <- investment %>%
+  filter(!Subcategory %in% c("Power - Natural Gas", "Power - Coal","Natural gas processing")) %>% #filter out Carbon Management categories we don't like
   rename(Value=Estimated_Actual_Quarterly_Expenditure) %>%
   mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology),
          year_quarter = yq(quarter)) %>%
   left_join(socioecon,by=c("State"="State","quarter"="quarter")) %>%
   filter(year_quarter>"2020-12-01") %>%
-  group_by(State,industry) %>%
+  mutate(post_IRA = ifelse(year_quarter>"2022-08-15",1,0)) %>%
+  filter(post_IRA=="1") %>%
+  group_by(State,industry,Subcategory) %>%
   summarize_at(vars(Value,real_gdp),sum,na.rm=T) %>%
   mutate(inv_gdp = Value/real_gdp) %>%
   group_by(State) %>%
@@ -204,20 +217,22 @@ state_labels <- state_labels %>%
 # Plotting the US state map with investment data
 inv_spec_map<-ggplot() +
   geom_polygon(data = state_map_data, aes(x=x,y=y,group=group,fill = lq_bin), color = "white") +
-  geom_text(data = state_labels, aes(x = x, y = y, label = industry), size = 2, color = "black", fontface = "bold") +
+  geom_label_repel(data = state_labels, aes(x = x, y = y, label = Subcategory), size = 2, color = "black", fontface = "bold", label.padding = unit(0.5, "lines"), label.size = 0.25, fill = "white") +
   scale_fill_manual(values = rmi_palette, na.value = "grey90", name = "Investment Share Relative to National Average") +
   labs(title = "State Clean Energy Investment Specializations", 
        subtitle = "Share of clean energy investment relative to the national average for most specialized industry (labelled)",
        fill = "Investment Specialization",
        caption="Source: Clean Investment Monitor") +
-  theme(legend.position=c(0.9,0.1))+
-  theme_void()
+  theme_void()+
+  theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/state_specialization_map.png"), plot = inv_spec_map, width = 8, height = 6, dpi = 300)
 
 
 #Select State Investment/GDP
 plot_invgdp<- ggplot(data=states_investment_gdp_2123 %>%
                        filter(State==state_abbreviation) %>%
-                       slice_max(order_by=gdp_lq,n=6),aes(y=reorder(industry,gdp_lq),x=gdp_lq,fill=industry)) +
+                       slice_max(order_by=gdp_lq,n=6),aes(y=reorder(Subcategory,gdp_lq),x=gdp_lq,fill=Subcategory)) +
   geom_bar(stat="identity")+
   labs(title=paste("Clean Energy Investment in", state_name, "since 2021 Relative to GDP"), 
        y="Industry", x="Investment/GDP Relative to National Average") +
@@ -225,9 +240,18 @@ plot_invgdp<- ggplot(data=states_investment_gdp_2123 %>%
   scale_fill_manual(values = rmi_palette)+
   theme(legend.position="none")
 
-
+ggsave(paste0(output_folder,"/state_investment_gdp.png"), plot = plot_invgdp, width = 8, height = 6, dpi = 300)
 
 #Clean Energy Manufacturing since IRA within Region
+state_man_total <- investment %>%
+  mutate(post_IRA = ifelse(quarter %in% c("2022-Q3","2022-Q4","2023-Q1","2023-Q2","2023-Q3","2023-Q4","2024-Q1"),1,0)) %>%
+  filter(Segment=="Manufacturing",
+         post_IRA=="1") %>%
+  group_by(State) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  mutate(share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)*100) %>%
+  ungroup()
+
 region_abbrv<-states_simple %>%
   filter(abbr == state_abbreviation) 
 
@@ -237,7 +261,7 @@ state_man <- facilities %>%
          year=substr(date,1,4),
          post_IRA = ifelse(date>"2022-08-15",1,0)) %>%
   filter(Segment=="Manufacturing",
-         region %in% region_abbrv$region,
+         region.x %in% region_abbrv$region,
          post_IRA=="1") %>%
   group_by(State,Technology) %>%
   summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T) %>%
@@ -260,7 +284,7 @@ plot_manufacturing<-ggplot(data=state_man,aes(x=reorder(State,-Total_Facility_CA
   scale_fill_manual(values = expanded_palette)+
   scale_y_continuous(expand=c(0,0))
 
-
+ggsave(paste0(output_folder,"/",state_abbreviation,"_manufacturing.png"),plot=plot_manufacturing,width=8,height=6,units="in",dpi=300)
 #ANNOUNCED INVESTMENT
 #All Manufacturing Facilities
 facilities_man<-facilities %>%
