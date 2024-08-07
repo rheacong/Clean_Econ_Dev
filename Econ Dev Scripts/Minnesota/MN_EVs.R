@@ -15,6 +15,7 @@ state_abbreviation <- "MN"  # Replace with any US state abbreviation
 state_name <- "Minnesota"  # Replace with the full name of any US state
 region_id <- us_counties %>%
   filter(abbr == state_abbreviation) 
+region_name <- "Minneapolis-St. Paul-Bloomington, MN-WI"
 
 #EV Registrations by State
 #Check for latest data here: https://afdc.energy.gov/data/categories/maps-data-categories?sort=most+recent
@@ -81,7 +82,6 @@ url<- 'https://www2.census.gov/geo/docs/maps-data/data/rel/zcta_county_rel_10.tx
 # Reading the text file as a CSV
 data <- read_delim(url, delim = ",", col_names = TRUE)
 
-
 evlocs <- ev_locs %>%
   filter(Fuel.Type.Code=="ELEC") %>%
   select(State,ZIP,Groups.With.Access.Code,Facility.Type) %>%
@@ -96,13 +96,14 @@ ea_evlocs <- evlocs %>%
   arrange(desc(evlocs_per_cap))
 
 write.csv(ea_evlocs,paste0(output_folder,"/ea_evlocs.csv"))
+  
 
-multi_region_id <- EAs %>% filter(`EA Name`==region_name)
+#multi_region_id <- EAs %>% filter(`EA Name`==region_name)
 
-region_evlocs<-evlocs %>%
-  filter(`EA Name` %in% multi_region_id$`EA Name`) %>%
-  group_by(Groups.With.Access.Code,Facility.Type) %>%
-  summarize(n=n())
+# region_evlocs<-evlocs %>%
+#   filter(`EA Name` %in% multi_region_id$`EA Name`) %>%
+#   group_by(Groups.With.Access.Code,Facility.Type) %>%
+#   summarize(n=n())
 
 #Joining with County-Level EV Registrations
 evlocs_county <- ev_locs %>%
@@ -120,22 +121,22 @@ state_evlocs_county<-evlocs_county %>%
 
 #Graphs
 us_counties<-us_map("counties")
-mn_counties <- us_counties %>% filter(full=="Minnesota")
+state_counties <- us_counties %>% filter(full==state_name)
 
-# Potential for state map
-# ggplot() +
-#   geom_sf(data = mn_counties, fill = "white", color = "black") +
-#   geom_point(data = state_evlocs_county %>% filter(!is.na(ev_cap)),
-#              aes(x = st_coordinates(geom)[, 1],
-#                  y = st_coordinates(geom)[, 2],
-#                  size = ev_cap),
-#              color = "blue", alpha = 0.7) +
-#   scale_size_continuous(range = c(3, 10)) +  # Adjust bubble sizes as needed
-#   labs(title = "Bubble Map of Total EV Capacity",
-#        size = "Value") +
-#   theme_minimal()
+# State bubble map of total EV capacity in each county
+ggplot() +
+  geom_sf(data = state_counties, fill = "white", color = "black") +
+  geom_point(data = state_evlocs_county %>% filter(!is.na(ev_cap)),
+             aes(x = st_coordinates(geom)[, 1],
+                 y = st_coordinates(geom)[, 2],
+                 size = ev_cap),
+             color = "blue", alpha = 0.7) +
+  scale_size_continuous(range = c(3, 10)) +  # Adjust bubble sizes as needed
+  labs(title = "Bubble Map of Total EV Capacity",
+       size = "Value") +
+  theme_minimal()
 
-#Scatter Plot
+#Scatter Plot for EV uptake in the state
 EV_total_plot<-ggplot(data=state_evlocs_county,
                         aes(x=total,y=total_charg,color=ev_cap))+
   geom_point()+
@@ -143,8 +144,19 @@ EV_total_plot<-ggplot(data=state_evlocs_county,
   labs(title=paste0("EV Uptake in ",state_name),
        x="Total EV Registrations",
        y="EV Charging Stations",
-       color="EV Capacity")+
+       color="EVs per capita")+
   geom_text_repel(aes(label=county),size=2)
 
 ggsave(paste0(output_folder,"/",state_abbreviation,"_EV_total_plot.png"),plot=EV_total_plot,width=8,height=6,units="in",dpi=300)
 
+# Scatter Plot for just counties in region
+EV_region_plot<-ggplot(data=state_evlocs_county %>%
+                         filter(county %in% county_cbsa$County.County.Equivalent[county_cbsa$CBSA.Title==region_name]),
+                      aes(x=total,y=total_charg,color=ev_cap))+
+  geom_point()+
+  theme_classic()+
+  labs(title=paste0("EV Uptake in ",region_name),
+       x="Total EV Registrations",
+       y="EV Charging Stations",
+       color="EVs per capita")+
+  geom_text_repel(aes(label=county),size=2)
