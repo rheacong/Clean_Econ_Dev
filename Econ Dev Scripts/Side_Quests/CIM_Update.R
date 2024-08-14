@@ -1,5 +1,5 @@
 ### CIM Facilities Coords Code
-# Author: Rhea Cong, 08-13-2024
+# Author: Rhea Cong, 08-14-2024
 
 # This code prompts user for locations to missing CIM facilities data if the investment is over 90M and post-IRA
 # Join with EA name and CGT technology/feasibility
@@ -75,7 +75,6 @@ prompt_fill <- function(data) {
 facilities_update$Announcement_Date <- as.Date(facilities_update$Announcement_Date)
 facilities_update$LatLon_Valid <- as.logical(facilities_update$LatLon_Valid)
 
-# Only for manufacturing segment
 facilities_update_man <- facilities_update %>% filter(Segment=="Manufacturing")
 
 rows <- which(is.na(facilities_update_man[, 11]) & (facilities_update_man[,34]>90) & (facilities_update_man[,33]>"2022-08-16"))
@@ -90,8 +89,9 @@ us_counties <- counties()
 us_counties <- st_transform(us_counties, st_crs(facilities_sf))
 facilities_with_counties <- st_join(facilities_sf, us_counties)
 facilities_update_man$county_2020_geoid[rows] <-facilities_with_counties$GEOID
+facilities_update_man$county_2020_geoid<-as.numeric(facilities_update_man$county_2020_geoid)
 
-facilities_ea<-left_join(facilities_update_man,EAs %>% select(FIPS, County, `EA Name`),by=c("county_2020_geoid"="FIPS"))
+facilities_ea<-left_join(facilities_update_man,EAs %>% select(fips, County, `EA Name`),by=c("county_2020_geoid"="fips"))
 
 # Tech crosswalk
 # Edits for inverters, electrolyzers, fueling equipment, ev chargers -> energy transmission equipment
@@ -124,3 +124,7 @@ facilities_ea_feas <- rbind(facilities_ea_feas,critmins_feas1, critmins_feas2)
 
 # Write csv
 write.csv(facilities_ea_feas, file="./facilities_ea_feas.csv")
+
+# Investigating missing rows
+na_facilities <- facilities_ea_feas[which(facilities_ea_feas$EA_name=="NA (EA)"),]
+
