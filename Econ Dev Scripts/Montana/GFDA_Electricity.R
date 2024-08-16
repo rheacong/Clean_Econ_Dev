@@ -1,5 +1,5 @@
 #Electricity Sector
-# Last edited by Rhea Cong, 08/16/2024
+# Last edited by Rhea Cong, 07/02/2024
 
 #This script is used to generate the charts and maps for the electricity sector in the US
 

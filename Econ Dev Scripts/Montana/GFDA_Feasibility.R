@@ -1,5 +1,5 @@
 #Feasibility & Clean Growth Tool
-# Last edited by Rhea Cong, 08/16/2024
+# Last edited by Rhea Cong, 06/24/2024
 
 # State Variable - Set this to the abbreviation of the state you want to analyze
 state_abbreviation <- "MT"  # Replace with any US state abbreviation
