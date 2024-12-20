@@ -1,0 +1,1312 @@
+---
+title: "Econ Dev Basics"
+author: "rjcong"
+date: "2024-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This R Markdown walks through the basic Econ Dev scripts to output a set of graphs
+for initial CRED analysis. Further data analysis can be done in the original 
+R scripts, found in Lachlan's GitHub Repository (https://github.com/lrcarey222/Clean_Econ_Dev/). Relevant graphs can be transferred 
+to DataWrapper by writing out the data using write.csv(file, name="").
+
+#### Set Up
+Run CRED R Setup Script.R first!
+
+```{r CREDsetup, echo=FALSE, include=FALSE}
+#Generic Setup for CRED analysis
+
+#Set the Working Directory to your Username
+# setwd("C:/Users/LCarey.RMI/")
+setwd("../RMI24")
+
+# Libraries
+library(bea.R)
+library(downloader)
+library(shiny)
+library(shinycssloaders)
+library(tidyverse)
+library(ggplot2)
+library(zoo)
+library(usmapdata)
+library(lubridate)
+library(readxl)
+library(httr)
+library(censusapi)
+library(httr)
+library(data.table)
+library(magrittr)
+library(stringr)
+library(ggmap)
+library(data.table)
+library(ggthemes)
+library(wesanderson)
+library(RColorBrewer)
+library(chattr)
+library(usmap)
+library(maps)
+library(sf)
+library(grDevices)
+library(officer)
+library(rvg)
+library(jsonlite)
+#library(bls)
+library(ggrepel)
+library(fuzzyjoin)
+library(tigris)
+library(devtools)
+install_github('mikeasilva/blsAPI')
+library(blsAPI)
+
+rmi_palette<-c("#0BD0D9",
+               "#0989B1",
+               "#003A61",
+               "#FFCA08",
+               "#F8931D",
+               "#548538",
+               "#7F7F7F")
+
+# Adding distinct colors manually
+additional_colors <- c("#E63946", "#F4A261", "#2A9D8F", "#264653", "#E76F51", "#8D99AE", "#9C6644","#6A4C93",  # Purple
+                       "#F77F00",  # Vivid orange
+                       "#80B918",  # Lime green
+                       "#005F73",  # Dark cyan
+                       "#9D4EDD",  # Lavender
+                       "#EF233C")   # Crimson
+
+# Combine existing and additional colors
+expanded_palette <- c(rmi_palette, additional_colors)
+
+
+#APIs and Keys
+#Census APi
+#https://github.com/hrecht/censusapi
+# Add key to .Renviron
+Sys.setenv(CENSUS_KEY='0b3d37ac56ab19c5a65cbc188f82d8ce5b36cfe6')
+#Google API
+register_google(key ="AIzaSyBQFZhv1jZWHejy4BCdI5kb3JN8zfO62Wc")
+#BLS API
+#bls_set_key("c5294b721a354d5da7727fc5e7a1bf30")
+
+
+#Geographies
+census_divisions<- read.csv('https://raw.githubusercontent.com/cphalpert/census-regions/master/us%20census%20bureau%20regions%20and%20divisions.csv')
+us_counties <-us_map("counties")
+counties <- counties(class = "sf")
+county_gdp<- read.csv('./Data/county_gdp_2022.csv',skip=3)
+# county_gdp <-county_gdp %>% mutate(fips=as.numeric(GeoFips))
+colnames(county_gdp)[1] <- "FIPS"
+state_gdp<- read.csv('./Data/state_gdp_22.csv',skip=3)
+msa_gdp<- read.csv('./Data/msa_gdp_2022.csv',skip=3)
+states_simple <- read.csv('./Data/rmi_regions.csv')
+
+county_cbsa<-read.csv('./Data/csa_cbsa_county.csv',skip=2)
+county_cbsa <- county_cbsa %>%  mutate(fips = as.numeric(paste0(FIPS.State.Code, sprintf("%03d", as.numeric(FIPS.County.Code)))))
+
+county_pop<-read.csv('https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv')
+
+EAs<-read_excel("./Data/BEA Economic Areas and Counties.xlsx",2)
+EAs<-EAs %>%
+  mutate(fips=as.numeric(FIPS))
+EA_gdp <- EAs %>%
+  inner_join(county_gdp,by="FIPS") %>%
+  mutate(gdp_22=as.numeric(X2022)) %>%
+  group_by(`EA Name`) %>%
+  summarize_at(vars(gdp_22),sum,na.rm=T) 
+
+
+#NAICS Codes
+file_url <- 'https://www.census.gov/naics/2017NAICS/2-6%20digit_2017_Codes.xlsx'
+temp_file <- tempfile(fileext = ".xlsx")
+GET(url = file_url, write_disk(temp_file, overwrite = TRUE))
+naics2017 <- read_excel(temp_file, sheet = 1)  # 'sheet = 1' to read the first sheet
+
+naics2022<-read_excel('./Data/2022_to_2017_NAICS.xlsx',1,skip=2)
+
+#Energy Transition Industries - RMI Definition
+eti_long<-read_excel("./Data/Transition_Industries_FINAL.xlsx",2)
+
+```
+
+#### Set the state and region of interest
+
+```{r}
+# State Variable - Set this to the abbreviation of the state you want to analyze
+state_abbreviation <- "LA"  # Replace with any US state abbreviation
+state_name <- "Louisiana"  # Replace with the full name of any US state
+
+# Region of interest - be clear whether this is EA or MSA name
+region_name <- "New Orleans-Metairie, LA" # This is an MSA, so we will pull from county_cbsa data. Other options are census_divisions or EAs
+
+# Or create own region of interest for neighboring states
+region_interest <- states_simple %>%
+  filter(abbr %in% c("LA", "OK", "TX", "AR", "MS", "AL","TN"))
+
+# Create output folder
+output_folder <- "./LA"
+```
+
+## Clean Investment Monitor
+
+Public and private investment data from the Rhodium Group and MIT CEEPR into manufacturing and deployment of clean energy technologies in the US, quarterly since 2018.
+
+#### Load investment data and crosswalk with RMI, NAICS, and CIM
+```{r, warning=FALSE}
+# Clean investment Monitor Data - Check it's the latest quarter available
+investment_data_path <- './Data/quarterly_actual_investment.csv'
+facilities_data_path <- './Data/manufacturing_energy_and_industry_facility_metadata.csv'
+socioeconomics_data_path <- './Data/socioeconomics.csv'
+
+# Read Data
+investment <- read.csv(investment_data_path, skip=5)
+facilities <- read.csv(facilities_data_path, skip=5)
+socioecon <- read.csv(socioeconomics_data_path, skip=5)
+
+#Tech Mapping between RMI, NAICS, and CIM Terminology
+tech_mapping <- data.frame(
+  Segment = c("Manufacturing", "Manufacturing", "Manufacturing", "Manufacturing", "Manufacturing", "Manufacturing", "Manufacturing", "Manufacturing", "Energy and Industry", "Energy and Industry", "Energy and Industry", "Energy and Industry", "Energy and Industry", "Energy and Industry"),
+  Technology = c("Batteries", "Solar", "Critical Minerals", "Fueling Equipment", "Zero Emission Vehicles", "Electrolyzers", "Storage", "Wind", "Hydrogen", "SAF", "Storage", "Nuclear", "Solar", "Wind"),
+  tech = c("Batteries & Components", "Solar Energy Components", "Low-Carbon Minerals", "Low-Carbon Industrial Equipment", "Electric Vehicles", "Low-Carbon Industrial Equipment", "Batteries & Components", "Wind Energy Components", "Green Hydrogen", "Biofuels", "Energy Utility Systems", "Nuclear Electric Power", "Solar Electric Power", "Wind Electric Power")
+)
+
+tech_mapping <- left_join(tech_mapping,eti_long %>% select(Sector,Subsector,Technology,`6-Digit Code`,`6-Digit Description`),by=c("tech"="Technology"))
+
+tech_mapping<-left_join(tech_mapping,naics2022 %>% select("2022 NAICS Code",
+                                                          "2022 NAICS Title",
+                                                          "2017 NAICS Code"),
+                        by=c("6-Digit Code"="2017 NAICS Code"))
+```
+
+#### Plot and save investments in the state, by quarter and by year
+Total investment value in Millions 2022 USD in the state of interest, split by industry.
+
+```{r state investment, echo=FALSE}
+# Determine the top 5 technologies by value for each state and segment and create "Other" Category
+top_technologies <-investment %>%
+  rename(Value=Estimated_Actual_Quarterly_Expenditure ) %>%
+  mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology)) %>%
+  group_by(State,industry) %>%
+  summarize_at(vars(Value),sum,na.rm=T) %>%
+  arrange(desc(Value)) %>%
+  slice_max(order_by=Value,n=5)%>%
+  ungroup() %>%
+  select(State, industry) %>%
+  distinct() %>%
+  mutate(top=1) # Get unique top technologies by state and segment
+
+#Quarterly Investment by State and Industry
+states_investment_quarterly <- investment %>%
+  mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology)) %>%
+  left_join(socioecon,by=c("State"="State","quarter"="quarter")) %>%
+  left_join(top_technologies, by = c("State", "industry")) %>%
+  rename(Value=Estimated_Actual_Quarterly_Expenditure) %>%
+  mutate(industry = ifelse(top=="1",industry, "Other"),
+         industry=ifelse(is.na(industry),"Other",Technology)) %>%
+  group_by(State,industry,quarter) %>%
+  summarize_at(vars(Value,real_gdp),sum,na.rm=T) %>%
+  mutate(inv_gdp = Value/real_gdp) %>%
+  mutate(year_quarter = yq(quarter))
+
+#Quarterly Clean Energy Investment Chart for the State
+plot_quarterly_inv<-ggplot(data=states_investment_quarterly %>%
+                             filter(State==state_abbreviation) %>%
+                             select(State,year_quarter,Value,industry),aes(x=year_quarter,y=Value,fill=industry)) +
+  geom_col(position='stack') +
+  labs(title=paste("Clean Energy Investment in", state_name, "since 2018"), 
+       x="Quarter", y="Investment Value", fill = "Industry") +
+  theme_classic()+
+  scale_fill_manual(values = rmi_palette)+
+  scale_y_continuous(expand=c(0,0))
+
+plot_quarterly_inv
+
+# Plot yearly CIM investment in state
+states_investment_year <- investment %>%
+  mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology)) %>%
+  left_join(socioecon,by=c("State"="State","quarter"="quarter")) %>%
+  left_join(top_technologies, by = c("State", "industry")) %>%
+  rename(Value=Estimated_Actual_Quarterly_Expenditure) %>%
+  mutate(industry = ifelse(top=="1",industry, "Other"),
+         industry=ifelse(is.na(industry),"Other",Technology)) %>%
+  mutate(year = substr(quarter, 1,4)) %>%
+  group_by(State,industry,year) %>%
+  summarize_at(vars(Value,real_gdp),sum,na.rm=T) %>%
+  mutate(inv_gdp = Value/real_gdp)
+
+plot_yearly_inv<-ggplot(data=states_investment_year %>%
+                          filter(State==state_abbreviation, year != "2024") %>% # incomplete year of data
+                          select(State,year,Value,industry),aes(x=year,y=Value,fill=industry)) +
+  geom_col(position='stack') +
+  labs(title=paste("Clean Energy Investment in", state_name, "since 2018"), 
+       x="Year", y="Investment Value, Millions USD", fill="Industry") +
+  theme_classic()+
+  scale_fill_manual(values = rmi_palette)+
+  scale_y_continuous(expand=c(0,0))
+
+plot_yearly_inv
+```
+
+#### Compare manufacturing investments in the region
+Seeing how neighboring states have performed in attracting investments, and for what kinds of cleantech manufacturing.
+
+```{r regional manufacturing, echo=FALSE}
+state_man <- facilities %>%
+  left_join(states_simple,by=c("State"="abbr") ) %>%
+  mutate(date=as.Date(Announcement_Date),
+         year=substr(date,1,4),
+         post_IRA = ifelse(date>"2022-08-15",1,0)) %>%
+  filter(Segment=="Manufacturing",
+         full %in% region_interest$full,
+         post_IRA=="1") %>%
+  group_by(State,Technology) %>%
+  summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T) %>%
+  ungroup() 
+state_man<-as.data.frame(state_man)
+state_man<-state_man[1:3]
+
+#Stacked Column chart of clean energy manufacturing
+plot_manufacturing<-ggplot(data=state_man,aes(x=reorder(State,-Total_Facility_CAPEX_Estimated),y=Total_Facility_CAPEX_Estimated,fill=Technology)) +
+  geom_col(position='stack') +
+  labs(title=paste("Clean Energy Manufacturing in the Region", "since passage of the IRA"), # Can fill in region name
+       x="State", y="Total Facility CAPEX Estimated ($m)",
+       caption="Source: Clean Investment Monitor") +
+  theme_classic()+
+  scale_fill_manual(values = expanded_palette)+
+  scale_y_continuous(expand=c(0,0))
+
+plot_manufacturing
+```
+
+#### County-level facilities
+Takes the facilities investment data and matches it to 2020 ACS counties using a spatial join, in order to sum the investment within the MSA/EA/counties of interest. This example is at the MSA but the R Script contains EA too. Could also manually create a vector of county names, then filter for facilities %in% that vector.
+
+``` {r county facilities, echo=FALSE}
+#Take Latitude & Longitude of Projects and match to Counties
+facilities<-facilities %>%
+  mutate(date=as.Date(Announcement_Date),
+         post_IRA = ifelse(date>"2022-08-15",1,0))  %>%
+  mutate(across(where(is.numeric), as.numeric))
+facilities <- facilities[!is.na(facilities$Longitude) & !is.na(facilities$Latitude), ]
+
+facilities_sf <- st_as_sf(facilities, coords = c("Longitude", "Latitude"), crs = 4326)
+options(tigris_class = "sf") # Ensure tigris returns simple features (sf) objects
+us_counties <- counties()
+us_counties <- st_transform(us_counties, st_crs(facilities_sf))
+facilities_with_counties <- st_join(facilities_sf, us_counties)
+facilities$County <- facilities_with_counties$NAME
+facilities$statefp<-(facilities_with_counties$STATEFP)
+facilities$countyfp<-facilities_with_counties$COUNTYFP
+facilities$fips<-paste0(facilities$statefp,facilities$countyfp)
+
+facilities<-left_join(facilities,county_cbsa, by=c("county_2020_geoid"="fips"))
+
+#Technology Announcements by MSA
+facilities_msa_tech <- facilities %>%
+  mutate(announce_year=substr(Announcement_Date,1,4)) %>%
+  filter(Current_Facility_Status != "C",
+         #announce_year %in% c("2022","2023"),
+         !is.na(CBSA.Title),
+         nzchar(CBSA.Title)) %>%
+  group_by(CBSA.Title,Segment,Technology) %>%
+  summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T)%>%
+  group_by(Segment) %>%
+  mutate(Percentile = percent_rank(-Total_Facility_CAPEX_Estimated),
+         Rank = rank(-Total_Facility_CAPEX_Estimated,)) %>%
+  arrange(desc(Total_Facility_CAPEX_Estimated))%>%
+  mutate(msa_name=paste0(CBSA.Title," (MSA)")) %>%
+  mutate(industry=ifelse(Segment=="Manufacturing",paste0(Technology," Manufacturing"),Technology)) %>%
+  select(-CBSA.Title)
+
+# Track announced at MSA level by year
+msa_tech_year_facilities <- facilities %>%
+  mutate(announce_year=substr(Announcement_Date,1,4)) %>%
+  filter(Current_Facility_Status != "C",
+         State.Name==state_name,
+         !is.na(CBSA.Title),
+         nzchar(CBSA.Title)) %>%
+  group_by(CBSA.Title,Segment,Technology, announce_year, Subcategory) %>%
+  summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T)%>%
+  filter(CBSA.Title==region_name)
+
+# Plot investment by year and tech in MSA
+plot_yearly_msa_facilities<-ggplot(data=msa_tech_year_facilities, aes(x=announce_year,y=Total_Facility_CAPEX_Estimated,fill=Technology)) +
+  geom_col(position='stack') +
+  labs(title=paste("Clean Energy Technology Manufacturing Investment in", region_name, "since 2017"), 
+       x="Year", y="Investment Value (Millions USD)") +
+  theme_classic()+
+  scale_fill_manual(values = rmi_palette)+
+  scale_y_continuous(expand=c(0,0))
+
+plot_yearly_msa_facilities
+```
+#### Tax incentives
+Read in federal tax investments from 45X, 45V, 45Q, and 48, then match to data for manufacturing, energy generation, and technology deployment. Graphs the tax incentives received by states in the region of interest.
+``` {r tax incentives, echo=FALSE, warning=FALSE}
+#Federal Tax Credit Incentives State-Level Estimates
+tax_inv_cat<-read.csv('./Data/tax_investment_by_category.csv',skip=2)
+tax_inv_state<-read.csv('./Data/tax_investment_by_state.csv',skip=2)
+
+#45X
+fac_45x<-facilities %>%
+  filter(Segment=="Manufacturing",
+         Technology %in% c("Solar",
+                           "Wind",
+                           "Critical Minerals",
+                           "Batteries"),
+         Current_Facility_Status=="O") %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Total_Facility_CAPEX_Estimated),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(cap_share=Total_Facility_CAPEX_Estimated/sum(Total_Facility_CAPEX_Estimated)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Advanced Manufacturing Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate(state_45x = Total.Federal.Investment.2022USBn*cap_share) 
+
+#45V & 45Q
+fac_45vq<-investment %>%
+  filter(Segment=="Energy and Industry",
+         Technology %in% c("Hydrogen")|
+           Technology=="Carbon Management" & Subcategory %in% c("CCUS","Direct Air Capture")|
+           Technology=="Sustainable Aviation Fuels") %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(cap_share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Emerging Climate Technology Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate(state_45vq = Total.Federal.Investment.2022USBn*cap_share) 
+
+#45
+url <- 'https://www.eia.gov/electricity/data/eia860m/xls/april_generator2024.xlsx'
+destination_folder<-'./'
+file_path <- paste0(destination_folder, "eia_op_gen.xlsx")
+downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
+
+#Operating Generation
+op_gen <- read_excel("./Data/eia_op_gen.xlsx", sheet = 1,skip=2)
+
+state_45 <- op_gen %>%
+  filter(Status=="(OP) Operating",
+         Technology %in% c("Onshore Wind Turbine",
+                           "Solar Photovoltaic",
+                           "Batteries",
+                           "Solar Thermal with Energy Storage",
+                           "Geothermal",
+                           "Conventional Hydroelectric",
+                           "Landfill Gas",
+                           "Wood/Wood Waste Biomass")) %>%
+  group_by(`Plant State`) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) %>%
+  ungroup() %>%
+  mutate(share_mw=`Nameplate Capacity (MW)`/sum(`Nameplate Capacity (MW)`)) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("Plant State"="State")) %>%
+  cbind(tax_inv_cat %>% filter(Category=="Clean Electricity Tax Credits")) %>%
+  mutate(state_45 = Total.Federal.Investment.2022USBn*share_mw)
+
+#48
+url <- 'https://www.eia.gov/electricity/monthly/xls/table_6_01_b.xlsx'
+dest_file <- tempfile(fileext = ".xlsx")
+download.file(url, destfile = dest_file, mode = "wb")
+
+data <- read_excel(dest_file)
+
+rooftop_state<-read_excel("./Data/small_scale_solar_2024.xlsx",sheet=1,skip=2)
+rooftop_state <- rooftop_state %>%
+  rename_with(~c("res_cap",
+                 "com_cap",
+                 "ind_cap",
+                 "total_cap",
+                 "res_gen", 
+                 "com_gen",
+                 "ind_gen",
+                 "total_gen"), .cols = 5:12) %>%
+  mutate(across(c(res_cap:total_gen),as.numeric)) 
+
+state_48 <- rooftop_state %>%
+  filter(!State %in% c("US"),
+         !is.na(State)) %>%
+  mutate(com_gen = replace_na(com_gen, 0),
+         res_gen = replace_na(res_gen, 0),
+         ind_gen = replace_na(ind_gen, 0)) %>%
+  select(State,ind_gen,com_gen,res_gen) %>%
+  mutate(com_share=(ind_gen+com_gen)/sum((ind_gen+com_gen)),na.rm=T,
+         res_share=res_gen/sum(res_gen),na.rm=T) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  cbind(tax_inv_cat %>% filter(Category=="Non-residential Distributed Energy Tax Credits")) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Residential Energy & Efficiency Tax Credits"),by=c("Segment")) %>%
+  mutate(state_48_res = Total.Federal.Investment.2022USBn.y*(res_share)) %>%
+  mutate(state_48_com=  Total.Federal.Investment.2022USBn.x*(com_share))
+
+state_48 <- investment %>%
+  filter(Segment=="Retail",Technology %in% c("Heat Pumps","Distributed Electricity and Storage"),
+         quarter %in% c("2022-Q2",
+                        "2022-Q3",
+                        "2022-Q4",
+                        "2023-Q1",
+                        "2023-Q2",
+                        "2023-Q3",
+                        "2023-Q4",
+                        "2024-Q1")) %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(share=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Non-residential Distributed Energy Tax Credits"),by=c("Segment")) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Residential Energy & Efficiency Tax Credits"),by=c("Segment")) %>%
+  mutate(state_48_res = Total.Federal.Investment.2022USBn.y*(share)) %>%
+  mutate(state_48_com=  Total.Federal.Investment.2022USBn.x*(share))
+
+#zev
+zev<-investment %>%
+  filter(Segment=="Retail",Technology=="Zero Emission Vehicles",
+         quarter %in% c("2022-Q2",
+                        "2022-Q3",
+                        "2022-Q4",
+                        "2023-Q1",
+                        "2023-Q2",
+                        "2023-Q3",
+                        "2023-Q4",
+                        "2024-Q1")) %>%
+  group_by(State,Segment) %>%
+  summarize_at(vars(Estimated_Actual_Quarterly_Expenditure),sum,na.rm=T) %>%
+  group_by(Segment) %>%
+  mutate(share_ev=Estimated_Actual_Quarterly_Expenditure/sum(Estimated_Actual_Quarterly_Expenditure)) %>%
+  left_join(tax_inv_cat %>% filter(Category=="Zero Emission Vehicle Tax Credits"),by=c("Segment")) %>%
+  mutate(state_zev = Total.Federal.Investment.2022USBn*share_ev)
+
+#combine
+state_estimates<-state_45 %>%
+  rename(State=`Plant State`) %>%
+  select(State,state_45) %>%
+  left_join(fac_45x %>% select(State,state_45x),by=c("State")) %>%
+  left_join(fac_45vq %>% select(State,state_45vq),by=c("State")) %>%
+  left_join(state_48 %>% select(State,state_48_res,state_48_com),by=c("State")) %>%
+  left_join(zev %>% select(State,state_zev),by=c("State")) %>%
+  ungroup() %>%
+  select(-Segment.x,-Segment.y,-Segment.x.x,-Segment.y.y) %>%
+  mutate(across(where(is.numeric), ~replace_na(., 0))) %>%
+  mutate(total=(state_45+state_45x+state_45vq+state_48_res+state_48_com+state_zev)) %>%
+  left_join(tax_inv_state %>% select(State,Total.Federal.Investment..2022.Million.USD.),by=c("State")) %>%
+  mutate("Clean Electricity Tax Credits"=state_45/total*Total.Federal.Investment..2022.Million.USD.,
+         "Advanced Manufacturing Tax Credits"=state_45x/total*Total.Federal.Investment..2022.Million.USD.,
+         "Emerging Climate Technology Tax Credits"=state_45vq/total*Total.Federal.Investment..2022.Million.USD.,
+         "Residential Energy & Efficiency Tax Credits"=state_48_res/total*Total.Federal.Investment..2022.Million.USD.,
+         "Non-residential Distributed Energy Tax Credits"=state_48_com/total*Total.Federal.Investment..2022.Million.USD.,
+         "Zero Emission Vehicle Tax Credits"=state_zev/total*Total.Federal.Investment..2022.Million.USD.)
+
+state_estimates2<-state_estimates %>%
+  select(State,`Clean Electricity Tax Credits`,
+         `Advanced Manufacturing Tax Credits`,
+         `Emerging Climate Technology Tax Credits`,
+         `Residential Energy & Efficiency Tax Credits`,
+         `Non-residential Distributed Energy Tax Credits`,
+         `Zero Emission Vehicle Tax Credits`) %>%
+  pivot_longer(cols=-State,names_to="Category",values_to="Federal Investment (millions 2022 USD)") %>%
+  left_join(tax_inv_state %>% select(State,State.GDP..2022.Million.USD.),by=c("State")) %>%
+  mutate("Federal Investment (millions 2022 USD)"=round(`Federal Investment (millions 2022 USD)`,2),
+         "State GDP (millions 2022 USD)"=round(State.GDP..2022.Million.USD.,2),
+         "Federal Investment (% of State GDP)"=round(`Federal Investment (millions 2022 USD)`/`State GDP (millions 2022 USD)`*100,2)) 
+
+# Graph the tax incentives for the states in the region of interest
+state_ira <- state_estimates2 %>%
+  left_join(census_divisions,by=c("State"="State.Code")) %>%
+  filter(State.y %in% c(region_interest$full, state_name)) 
+
+state_ira_plot<-ggplot(data=state_ira) +
+  geom_col(aes(x=reorder(State,-`Federal Investment (% of State GDP)`),y=`Federal Investment (% of State GDP)`,fill=Category),position="stack") +
+  #coord_flip() +
+  scale_fill_manual(values=rmi_palette) +
+  labs(title = paste("Federal IRA Investment in the ","Gulf"," Division by Tax Credit"),
+       subtitle = "Percentage of 2022 GDP",
+       x="State",
+       fill = "Tax Credit",
+       caption="Source: Clean Investment Monitor")+
+  scale_y_continuous(expand=c(0,0))+
+  theme_classic()+
+  theme(legend.position=c(0.8,0.8),
+        plot.background = element_rect(fill = "white", color = "white"),
+        panel.background = element_rect(fill = "white", color = "white")) 
+
+state_ira_plot
+```
+
+## Electricity
+This script analyzes recent additions to the state's generation capacity and trends in renewable electricity growth pre- and post-IRA passage. Graphs compare renewable electricity growth in nearby states in the region as well as industrial electricity prices. Not included here, but the script has code to match specific energy plants by spatial join to county maps, to identify share of state renewable energy generated within EA or MSA or other group of counties.
+
+### Graph state operating generation capacity additions since 2011
+```{r electricity gen cap, echo=FALSE}
+
+# Load State Operating Generation Capacity
+#EIA Generation Capacity Data - Check it's the latest month available
+url <- 'https://www.eia.gov/electricity/data/eia860m/xls/march_generator2024.xlsx'
+destination_folder<-'./'
+file_path <- paste0(destination_folder, "eia_op_gen.xlsx")
+downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
+
+#Operating Generation
+op_gen <- read_excel("./Data/march_generator2024.xlsx", sheet = 1,skip=2)
+
+abbr_opgen_12_23 <- op_gen %>%
+  filter(`Plant State`== state_abbreviation & `Operating Year` > 2011) %>%
+  mutate(Technology = ifelse(grepl("Natural Gas", Technology), "Natural Gas", Technology)) %>%
+  filter(Technology != "Flywheels" & Technology != "All Other" & Technology != "Other Gases" & Technology != "Wood/Wood Waste Biomass" & Technology != "Pumped Storage" & Technology != "Wood and Wood Derived Fuels") 
+
+#Chart: Operating Generation Capacity by Technology, annual additions 
+plot_elec_ann_1224<-ggplot(data=abbr_opgen_12_23,aes(x=`Operating Year`,y=`Nameplate Capacity (MW)`,fill=Technology)) +
+  geom_col(position='stack') +
+  labs(title=paste0("Operating Generation Capacity Additions by Technology in ",state_abbreviation," since 2011"), 
+       x="Year", y="Nameplate Capacity (MW)") +
+  theme_classic()+
+  scale_fill_manual(values = expanded_palette)
+
+plot_elec_ann_1224
+
+# Save chart and write the csv for DataWrapper
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_op_gen_cap_annual", ".png")), 
+       plot = plot_elec_ann_1224,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+
+write.csv(abbr_opgen_12_23 %>%
+            filter(Status=="(OP) Operating") %>%
+            select(Technology, `Nameplate Capacity (MW)`, `Operating Year`) %>%
+            group_by(`Operating Year`, Technology) %>%
+            summarise(`Nameplate Capacity (MW)`=sum(`Nameplate Capacity (MW)`)) %>%
+            pivot_wider(names_from = `Operating Year`, values_from = `Nameplate Capacity (MW)`),
+          file=paste0("./DataWrapper/", state_abbreviation, "_gen_cap_tech"))
+
+abbr_12_23_elec_tech <- abbr_opgen_12_23 %>%
+  group_by(Technology) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) %>%
+  ungroup() %>%
+  mutate(share=`Nameplate Capacity (MW)`/sum(`Nameplate Capacity (MW)`)) %>%
+  arrange(desc(share))
+
+
+#Chart: Generation Capacity Additions since 2012
+plot_elec_cap_1224<-ggplot(data=abbr_12_23_elec_tech,aes(y=reorder(Technology,`Nameplate Capacity (MW)`),
+                                                         x=`Nameplate Capacity (MW)`,fill=Technology)) +
+  geom_col() +
+  labs(title=paste0("Total Generation Capacity Additions in ",state_name," since 2011"), 
+       y="", x="Nameplate Capacity (MW)",
+       caption="Source: EIA 860m") +
+  theme_classic()+
+  theme(legend.position = "none")+
+  scale_fill_manual(values = expanded_palette)
+
+plot_elec_cap_1224
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_plot_elec_cap_1224", ".png")), 
+       plot = plot_elec_cap_1224,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)  
+```
+### Graph renewable energy growth in neighboring states indexed to IRA passage in 2022 and cumulative capacity
+Could be compared to states in the same census division (the census_divisions dataframe), but also can manually define relevant states for comparison. May be useful to consider solar/wind availability, transmission lines, 
+``` {r comparison state rengen, echo=FALSE}
+states_gen <- op_gen %>%
+  group_by(`Plant State`,`Operating Year`,Technology) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) %>%
+  left_join(states_simple,by=c("Plant State"="abbr"))
+
+states_rengen <- states_gen %>%
+  filter(`Operating Year` > 2012 & Technology %in% c("Conventional Hydroelectric",
+                                                     "Onshore Wind Turbine",
+                                                     "Batteries",
+                                                     "Solar Photovoltaic",
+                                                     "Solar Thermal with Energy Storage",
+                                                     "Hydroelectric Pumped Storage",
+                                                     "Geothermal",
+                                                     "Solar Thermal without Energy Storage",
+                                                     "Offshore Wind Turbine")) %>%
+  
+  group_by(region,full, `Operating Year`) %>%
+  summarize(`Nameplate Capacity (MW)` = sum(`Nameplate Capacity (MW)`, na.rm = TRUE)) %>%
+  complete(`Operating Year` = 2013:2023, fill = list(`Nameplate Capacity (MW)` = 0)) %>%
+  mutate(Year = make_date(`Operating Year`)) %>%
+  mutate(cum_cap = cumsum(`Nameplate Capacity (MW)`)) %>%
+  group_by(region,full) %>%
+  mutate(cap_index_18 = 100*cum_cap/cum_cap[Year=="2022-01-01"]) %>%
+  mutate(rengrowth_18_23 = round(cap_index_18-100,1))
+
+
+#Chart: Renewable Electricity Growth since the IRA
+region_abbrv<-states_simple %>%
+  filter(abbr == state_abbreviation) 
+
+
+plot_elec_2020index<-ggplot(data=states_rengen %>%
+                              filter(full %in% region_interest$full),
+                            aes(x=Year,
+                                y=cap_index_18,
+                                group=full,
+                                color=full)) +
+  geom_line(data = subset(states_rengen%>%filter(full %in% region_interest$full), full != state_name), size = 1) +  # Plot other lines
+  geom_line(data = subset(states_rengen%>%filter(full %in% region_interest$full,), full == state_name), size = 2) + # Note that region is specific to project
+  scale_size_identity() +
+  labs(title="Renewable Electricity Growth Relative to IRA Passage",
+       subtitle="Cumulative Renewable Capacity Additions since 2012, indexed to Jan 2022",
+       x="", y="Index (100=08-2020)",
+       color="State")+
+  theme_classic()+
+  scale_color_manual(values = rmi_palette)
+
+plot_elec_2020index
+
+ggsave(file.path(output_folder, paste0("plot_elec_2020index", ".png")), 
+       plot = plot_elec_2020index,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300) 
+
+# Graph of cumulative generation capacity addition in the census division since 2012
+plot_elec_2020<-ggplot(data=states_rengen %>%
+                         filter(full %in% region_interest$full),
+                       aes(x=Year,
+                           y=cum_cap,
+                           group=full,
+                           color=full)) +
+  geom_line(data = subset(states_rengen%>%filter(full %in% region_interest$full), full != state_name), size = 1) +  # Plot other lines
+  geom_line(data = subset(states_rengen%>%filter(full %in% region_interest$full,), full == state_name), color = "red", size = 2) +
+  scale_size_identity() +
+  labs(title="Renewable Electricity Capacity Growth since 2012",
+       subtitle="Cumulative Renewable Capacity Additions since 2012",
+       x="", y="Cumulative Generation Capacity (MW)",
+       color="State",
+       caption="Source: EPA, eGrid 2022")+
+  theme_classic()+
+  scale_color_manual(values = rmi_palette)
+
+plot_elec_2020
+
+ggsave(file.path(output_folder, paste0("plot_elec_2020", ".png")), 
+       plot = plot_elec_2020,
+       width = 8,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)  
+```
+### Graph comparing industrial electricity prices in the region of interest since 2002
+```{r industry electricity, echo=FALSE}
+
+#Electricity Price in Industrial Sector - SEDS Data
+seds_all <- read.csv('https://www.eia.gov/state/seds/sep_update/Complete_SEDS_update.csv') #NB: BIG file
+
+msn_descriptions <- data.frame(
+  MSN=c("ESICD", #Electricity price in the industrial sector
+        "ESICP", #Electricity consumed by (i.e., sold to) the industrial sector
+        "ESICV", #Electricity expenditures in the industrial sector
+        "ESISB"), #Electricity sales to the industrial sector excluding refinery use
+  Description=c("Electricity price in the industrial sector",
+                "Electricity consumed by (i.e., sold to) the industrial sector",
+                "Electricity expenditures in the industrial sector",
+                "Electricity sales to the industrial sector excluding refinery use")
+)
+
+
+seds_elec_pric_ind <- seds_all %>%
+  filter(MSN %in% c("ESICD", #Electricity price in the industrial sector
+                    "ESICP", #Electricity consumed by (i.e., sold to) the industrial sector
+                    "ESICV", #Electricity expenditures in the industrial sector
+                    "ESISB", #Electricity sales to the industrial sector excluding refinery use
+                    "GDPRV"), #Real GDP
+         Year %in% 2002:2022) %>%
+  left_join(msn_descriptions,by=c("MSN"="MSN")) %>%
+  left_join(census_divisions, by=c("StateCode"="State.Code")) %>%
+  left_join(seds_all %>% filter(MSN=="GDPRV"),by=c("Year"="Year","StateCode"="StateCode"), suffix = c("", "_gdp")) %>%
+  mutate(data_gdp = round(Data/Data_gdp*100,2)) %>%
+  select(Region,Division,State,StateCode,Year,MSN, Description,Data,data_gdp)
+
+
+industrial_prices_plot<-ggplot() +
+  geom_line(data=seds_elec_pric_ind %>%
+              filter(State %in% region_interest$full,
+                     StateCode != state_abbreviation,
+                     MSN=="ESICD"),aes(x=Year,y=Data,group=StateCode,color=StateCode), size = 1) +  # Plot other lines
+  geom_line(data=seds_elec_pric_ind %>%
+              filter(State %in% region_interest$full,
+                     StateCode == state_abbreviation,
+                     MSN=="ESICD"),aes(x=Year,y=Data,group=StateCode,color=StateCode), size = 2) +
+  scale_size_identity()+
+  labs(title=paste0("Industrial Energy Prices in the ","Gulf", " Division since 2002"), 
+       subtitle="",
+       y="USD per million Btu",
+       x="Year",
+       caption="Source: EIA") +
+  theme_classic()+
+  scale_y_continuous(expand = c(0,0))+
+  scale_color_manual(values = expanded_palette)
+
+industrial_prices_plot
+
+ggsave(file.path(output_folder, paste0(state_abbreviation,"_ind_prices_plot", ".png")), 
+       plot = industrial_prices_plot,
+       width = 12,   # Width of the plot in inches
+       height = 8,   # Height of the plot in inches
+       dpi = 300)
+```
+
+```{r elec_cons, echo=FALSE, warnings=FALSE, include=FALSE}
+#EIA Data - Electricity Capacity by County and Region
+# url <- 'https://www.eia.gov/electricity/data/eia860m/xls/april_generator2024.xlsx' #Check for Updated Data
+# destination_folder<-"Downloads/"
+# file_path <- paste0(destination_folder, "eia_op_gen.xlsx")
+# downloaded_content <- GET(url, write_disk(file_path, overwrite = TRUE))
+op_gen <- read_excel("./Data/eia_op_gen.xlsx", sheet = 1,skip=2)
+
+#Clean Data and add Location Information
+op_gen_clean <- op_gen %>% 
+  filter(!is.na(Latitude) & !is.na(Longitude))
+op_gen_sf <- st_as_sf(op_gen_clean, coords = c("Longitude", "Latitude"), crs = 4326)
+op_gen_sf <- st_transform(op_gen_sf, crs = st_crs(counties))
+
+op_gen_with_county <- st_join(op_gen_sf, counties)
+
+#Generating Capacity by Economic Areas
+EA_gen <- op_gen_with_county %>%
+  mutate(fips=as.numeric(GEOID)) %>%
+  inner_join(EAs,by=c("fips"="fips")) %>%
+  filter(Status=="(OP) Operating") %>% #Only Operating Plants
+  left_join(states_simple, by=c("Plant State"="abbr")) %>%
+  group_by(region,full,`EA Name`,`Operating Year`,Technology) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) 
+
+#Generating Capacity by MSA
+MSA_gen <- op_gen_with_county %>%
+  mutate(fips=as.numeric(GEOID)) %>%
+  inner_join(county_cbsa,by=c("fips"="fips")) %>%
+  filter(Status=="(OP) Operating") %>% #Only Operating Plants
+  left_join(states_simple, by=c("Plant State"="abbr")) %>%
+  group_by(region,full,CBSA.Title,`Operating Year`,Technology) %>%
+  summarize_at(vars(`Nameplate Capacity (MW)`),sum,na.rm=T) 
+
+#Generating Capacity within Region of Interest
+region_rengen <- op_gen_with_county %>%
+  mutate(fips=as.numeric(GEOID)) %>%
+  filter(Status=="(OP) Operating", STATEFP==states_simple$fips[states_simple$full==state_name]) %>%
+  mutate(region_id=ifelse(fips %in% region_interest$fips,1,0)) %>%
+  as.data.frame(.) %>%
+  mutate(tech = case_when( #Group similar technologies
+    Technology=="Natural Gas Steam Turbine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combined Cycle" ~ "Natural Gas",
+    Technology=="Natural Gas Internal Combustion Engine" ~ "Natural Gas",
+    Technology=="Natural Gas Fired Combustion Turbine" ~ "Natural Gas",
+    Technology=="Conventional Steam Coal" ~ "Coal",
+    Technology=="Conventional Hydroelectric" ~ "Hydro",
+    Technology=="Onshore Wind Turbine" ~ "Wind",
+    Technology=="Batteries" ~ "Storage",
+    Technology=="Solar Photovoltaic" ~ "Solar",
+    Technology=="Solar Thermal with Energy Storage" ~ "Solar",
+    Technology=="Hydroelectric Pumped Storage" ~ "Hydro",
+    Technology=="Geothermal" ~ "Geothermal",
+    Technology=="Wood/Wood Waste Biomass"~"Biomass",
+    Technology=="Nuclear"~"Nuclear"
+  )) %>%
+  group_by(region_id, tech) %>%
+  summarize(`Nameplate Capacity (MW)` = sum(`Nameplate Capacity (MW)`, na.rm = TRUE)) 
+
+#Share of Generating Capacity in Region of Interest
+rengen_share <- region_rengen %>%
+  group_by(tech) %>%
+  mutate(share=round(`Nameplate Capacity (MW)`/sum(`Nameplate Capacity (MW)`),3))
+rengen_share
+
+write.csv(rengen_share %>% filter(region_id=="1"), file=paste0("./DataWrapper/",state_abbreviation,"_rengen_share"))
+
+# Total generation capacity share
+gen_cap_share <- rengen_share %>%
+  group_by(region_id) %>%
+  summarise(gen_capacity = sum(`Nameplate Capacity (MW)`))
+
+gen_cap_share
+
+
+```
+
+## Clean Growth Tool (Feasibility)
+This script analyzes data from the Brookings Institution and RMI's Clean Growth Tool, which assesses a region's competitiveness for cleantech industries in terms of feasibility and complexity. Feasibility is a measure of the density of local workforce capacity in related industries, with the assumption that this historical industry density makes a new cleantech industry more highly feasible. Complexity refers to how specialized an industry is.
+
+### Graph scatterplots of cleantech industries at the state and regional levels
+```{r feasibility, echo=FALSE, warnings=FALSE}
+#Load Latest Clean Growth Tool Data
+cgt<-readRDS('./Data/acre_tool_final_data_042624')
+
+msa_data<-cgt$msa_data
+naics_msa_data<-cgt$naics_msa_data
+naics_data<-cgt$naics_data
+states_msa<-cgt$states_msa
+naics6d_data<-cgt$naics6d_data
+transition<-cgt$transition_sector_data
+
+#Combine and Clean Data
+feasibility<-naics_data %>%
+  select(transition_sector_category_id,naics,naics_desc) %>%
+  right_join(transition,by=c("transition_sector_category_id"="transition_sector_category_id")) %>%
+  select(transition_sector_category,naics,naics_desc) %>%
+  inner_join(naics_msa_data,by=c("naics"="naics")) %>%
+  filter(aggregation_level=="2") %>%
+  left_join(states_msa,by=c("msa"="cbsa")) %>%
+  left_join(msa_data %>%
+              select(region,msa,msa_name),by=c("msa"="msa")) %>%
+  select(statefp,state_name,state_avb,region,msa,msa_name,transition_sector_category, naics,naics_desc,density,pci,rca,jobs,jobs_l5,share_good_jobs,percent_change_jobs_l5) %>%
+  group_by(naics,naics_desc) %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  distinct()
+
+state_totals <- feasibility %>%
+  group_by(state_avb,naics_desc) %>%
+  summarize(across(c(jobs),sum,na.rm=T)) 
+
+# MSA population data
+msa_pop <- county_pop %>%
+  select(STATE,COUNTY,POPESTIMATE2022) %>%
+  mutate(FIPS=paste0(sprintf("%02d", STATE), sprintf("%03d", COUNTY)),
+         fips=as.numeric(FIPS)) %>%
+  left_join(county_cbsa,by=c("fips"="fips")) %>%
+  #filter(!is.na(County)) %>%
+  select(fips,CBSA.Title,POPESTIMATE2022) %>%
+  group_by(CBSA.Title) %>%
+  summarize_at(vars(POPESTIMATE2022),sum,na.rm=T) %>%
+  arrange(desc(POPESTIMATE2022))
+
+# Take a population weighted average to aggregate from county to state level
+state_feas_msa <- feasibility %>%
+  mutate(MSA_Name=gsub(" \\(MSA\\)","",msa_name)) %>%
+  left_join(msa_pop,by=c("MSA_Name"="CBSA.Title")) %>%
+  filter(region=="MSA") %>%
+  group_by(state_avb,transition_sector_category,naics_desc) %>%
+  summarize(across(c(density,pci,share_good_jobs),
+                   ~weighted.mean(.x,w=POPESTIMATE2022,na.rm=T))) %>%
+  group_by(naics_desc) %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  left_join(state_totals,by=c("state_avb"="state_avb","naics_desc"="naics_desc") )
+
+# State-level scatter plot of feasibility percentile and complexity
+ggplot(data=state_feas_msa %>% filter(state_avb==state_abbreviation,
+                                                       !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                                                          #"Transition Enabling Sector",
+                                                                                          "Transition Forestry, Land, and Agriculture (FLAG) Sector")),
+                        aes(x=feas_industry_percentile,y=pci,color=transition_sector_category,size=jobs))+
+  #geom_vline(xintercept = mean(state_feas$feas_industry_percentile),color='darkgrey') +
+  geom_hline(yintercept= mean(state_feas_msa$pci) ,color='darkgrey') +
+  geom_point()+
+  scale_color_manual(values=expanded_palette)+
+  geom_text_repel(aes(label=naics_desc),size=2, max.overlaps = 10)+
+  theme_classic()+
+  labs(title=paste0("Feasibility of Clean Growth Sectors in ",state_name),
+       subtitle=paste0("Clean Energy Industry Transition Feasibility in ",state_name,".", "\n", "Size of bubble represents number of jobs in the sector"),
+       x="Feasibility Percentile",
+       y="Complexity",
+       color="Sector",
+       caption="Source: RMI, Clean Growth Tool")+
+  #xlim(0.4,1)+
+  #ylim(0,7)+
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 4),   # Decrease text size
+        legend.title = element_text(size = 5),  # Decrease title size
+        legend.key.size = unit(0.3, "cm"),      # Decrease key size
+        legend.spacing = unit(0.2, "cm")) +
+  guides(size = "none")
+
+# MSA level scatterplot - EA level also exists, or can take a weight across mannually defined group of counties
+MSA_feas <- feasibility %>%
+  mutate(MSA_Name=gsub(" \\(MSA\\)","",msa_name)) %>%
+  left_join(msa_pop,by=c("MSA_Name"="CBSA.Title")) %>%
+  filter(region=="MSA") %>%
+  group_by(MSA_Name,state_avb,transition_sector_category,naics_desc, naics) %>%
+  summarize(across(c(density,pci,share_good_jobs),
+                   ~weighted.mean(.x,w=POPESTIMATE2022,na.rm=T))) %>%
+  filter(MSA_Name==region_name, state_avb==state_abbreviation) %>%
+  ungroup() %>%
+  mutate(feas_industry_percentile=percent_rank(density)) %>%
+  left_join(state_totals,by=c("state_avb"="state_avb","naics_desc"="naics_desc") )
+
+ggplot(data=MSA_feas %>% filter(!transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                                                  "Transition Enabling Sector",
+                                                                                  "Transition Forestry, Land, and Agriculture (FLAG) Sector")),
+                      aes(x=feas_industry_percentile,y=pci,color=transition_sector_category,size=jobs))+
+  geom_vline(xintercept = mean(MSA_feas$feas_industry_percentile),color='darkgrey') +
+  geom_hline(yintercept= mean(MSA_feas$pci) ,color='darkgrey') +
+  geom_point()+
+  scale_color_manual(values=expanded_palette)+
+  geom_text_repel(aes(label=naics_desc),size=2, max.overlaps = 10)+
+  theme_classic()+
+  labs(title=paste0("Feasibility of Clean Growth Sectors in ",region_name),
+       subtitle=paste0("Clean Energy Industry Transition Feasibility in ",state_name,".", "\n", "Size of bubble represents number of jobs in the sector"),
+       x="Feasibility percentile",
+       y="Complexity",
+       color="Sector",
+       caption="Source: RMI, Clean Growth Tool")+
+  #xlim(0.4,1)+
+  #ylim(0,7)+
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 4),   # Decrease text size
+        legend.title = element_text(size = 5),  # Decrease title size
+        legend.key.size = unit(0.3, "cm"),      # Decrease key size
+        legend.spacing = unit(0.2, "cm")) +
+  guides(size = "none")
+
+```
+
+### Bar chart for top 10 most feasible industries in the state and in the EA/MSA
+```{r top 10 feas, echo=FALSE}
+# Highest feasibility sectors in state
+state_feas_plot2<-ggplot(data=state_feas_msa %>% filter(state_avb==state_abbreviation,
+                                                        !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                                                           "Transition Enabling Sector",
+                                                                                           "Transition Forestry, Land, and Agriculture (FLAG) Sector")) %>%
+                           group_by(state_avb) %>%
+                           slice_max(order_by=feas_industry_percentile,n=10),
+                         aes(x=reorder(naics_desc,feas_industry_percentile),y=feas_industry_percentile,fill=transition_sector_category))+
+  scale_y_continuous(expand=c(0,0))+
+  geom_col()+
+  coord_flip() +
+  scale_fill_manual(values=expanded_palette)+
+  theme_classic()+
+  labs(title=paste0("Feasibility of Clean Growth Sectors in ",state_name),
+       subtitle=paste0("High Feasibility Clean Energy Industries for ",state_name),
+       x="Industry",
+       y="Feasibility",
+       fill="Sector",
+       caption="Source: RMI, Clean Growth Tool")+
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 4),   # Decrease text size
+        legend.title = element_text(size = 5),  # Decrease title size
+        legend.key.size = unit(0.3, "cm"),      # Decrease key size
+        legend.spacing = unit(0.2, "cm"))
+
+state_feas_plot2
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_feasibility_industry.png"),plot=state_feas_plot2,width=8,height=6,units="in",dpi=300)
+
+state_feas_msa %>% filter(state_avb==state_abbreviation,
+                          !transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                             #"Transition Enabling Sector",
+                                                             "Transition Forestry, Land, and Agriculture (FLAG) Sector")) %>%
+  group_by(state_avb) %>%
+  slice_max(order_by=feas_industry_percentile,n=10) %>%
+  write.csv(file= paste0("./DataWrapper/", state_abbreviation, "_top10_feasibility"))
+
+
+MSA_feas_plot2<-ggplot(data=MSA_feas %>% filter(!transition_sector_category %in% c("Environmental Protection & Management End-Use Sector",
+                                                                                   "Transition Enabling Sector",
+                                                                                   "Transition Forestry, Land, and Agriculture (FLAG) Sector")) %>%
+                         ungroup() %>%
+                         slice_max(order_by=feas_industry_percentile,n=10),
+                       aes(x=reorder(naics_desc,feas_industry_percentile),y=feas_industry_percentile,fill=transition_sector_category))+
+  scale_y_continuous(expand=c(0,0))+
+  geom_col()+
+  coord_flip() +
+  scale_fill_manual(values=expanded_palette)+
+  theme_classic()+
+  labs(title=paste0("Feasibility of Clean Growth Sectors in ",region_name),
+       subtitle=paste0("High Feasibility Clean Energy Industries for ",region_name),
+       x="Industry",
+       y="Feasibility",
+       fill="Sector",
+       caption="Source: RMI, Clean Growth Tool")+
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 4),   # Decrease text size
+        legend.title = element_text(size = 5),  # Decrease title size
+        legend.key.size = unit(0.3, "cm"),      # Decrease key size
+        legend.spacing = unit(0.2, "cm"))
+
+MSA_feas_plot2
+
+ggsave(paste0(output_folder,"/","MSA_feasibility_industry.png"),plot=MSA_feas_plot2,width=10,height=6,units="in",dpi=300)
+```
+
+## Employment
+The script contains data from County Business Patterns and BLS Quarterly Census of Employment and Wages, from which you can calculate fossil fuel employment, employment diversity, location quotients, and wages. We also defined occupations most relevant to CCIA priority projects from SOC data.
+
+### CBP employment data
+by NAICS codes
+```{r cbp, echo=FALSE, warning=FALSE, include=FALSE}
+# Define region_id as the counties in the EA or MSA of interest
+us_counties <-us_map("counties")
+us_counties_df <- as.data.frame(us_counties) %>% select(-geom)
+region_id <- us_counties_df %>%
+  filter(fips %in% county_cbsa$fips[county_cbsa$CBSA.Title == region_name]) # Edit as necessary
+
+#Use County Business Patterns Census Data for Employment figures at county level
+cbp_2021 <- getCensus(
+  name = "cbp",
+  vars=c("STATE",
+         "COUNTY",
+         "NAICS2017",
+         "SECTOR",
+         "SUBSECTOR",
+         "INDLEVEL",
+         "ESTAB",
+         "EMP",
+         "PAYANN"),
+  region = "county:*",
+  vintage = 2021)
+cbp_21<-cbp_2021
+
+#Join with State Abbreviations for state names etc
+cbp_21$state<-as.numeric(cbp_21$state)
+cbp_21<-left_join(states_simple,cbp_21,by=c("fips"="state"))
+
+#join with NAICS Codes to get industry descriptions
+cbp_21$NAICS2017<-as.numeric(cbp_21$NAICS2017)
+cbp_21 <-left_join(cbp_21,eti_long,by=c("NAICS2017"="6-Digit Code"))
+
+#Six Digit Level
+cbp_21 <- cbp_21 %>%
+  filter(INDLEVEL=="6")
+
+#Two Digit Level
+cbp21_2d <- cbp_2021 %>%
+  mutate(state=as.numeric(state)) %>%
+  filter(INDLEVEL=="2")  %>%
+  mutate(FIPS=paste0(STATE, COUNTY)) %>%
+  left_join(EAs,by=c("FIPS"="FIPS")) %>%
+  left_join(naics2017 %>% select(`2017 NAICS US   Code`,`2017 NAICS US Title`),by=c("NAICS2017"="2017 NAICS US   Code")) %>%
+  rename(naics_desc=`2017 NAICS US Title`)
+
+#Filter just for region of interest
+region_cbp_2d <- cbp21_2d %>%
+  filter(STATE==states_simple$fips[states_simple$abbr==state_abbreviation]) %>%
+  mutate(region_id=ifelse(fips %in% region_id$fips,1,0)) %>%
+  mutate(code=ifelse(NAICS2017 %in% c("00","11","21","22","23","31-33","42","48-49","54"),NAICS2017,"Other")) %>%
+  group_by(region_id,code) %>%
+  summarize_at(vars(EMP),sum,na.rm=T) %>%
+  mutate(share=EMP/sum(EMP[code=="00"]))
+
+region_cbp_2d
+
+MSA_cbp_2d <- cbp21_2d %>%
+  filter(fips %in% region_id$fips) %>%
+  # mutate(region_id=ifelse(fips %in% EA_id$fips,1,0)) %>%
+  mutate(code=ifelse(NAICS2017 %in% c("00","11","21","22","23","31-33","42","48-49","54"),NAICS2017,"Other")) %>%
+  group_by(code) %>%
+  summarize_at(vars(EMP),sum,na.rm=T) %>%
+  mutate(share=EMP/EMP[code=="00"])
+
+#Total Employment in Region/State
+region_totalemp<-region_cbp_2d %>%
+  ungroup() %>%
+  filter(code=="00") %>%
+  mutate(stateemp=sum(EMP),share=(EMP/stateemp))
+region_totalemp
+```
+
+### CCIA priority project SOC location quotient for DataWrapper
+Below is one of the useful ways to calculate the location quotient of specific occupations from the Standard Occupational Classification (SOC) system relevant to CCIA priority projects.
+```{r employment, echo=FALSE, warning=FALSE}
+### Location Quotient for specific SOCs identified for CCIA priority projects
+# Load libraries
+soc_data <- read_excel("./Data/state_M2023_dl.xlsx", sheet=1)
+          
+soc_state <- soc_data %>% filter(AREA_TITLE == state_name)
+
+# in region_interest          
+soc_interest <- soc_data %>% 
+  filter(AREA_TITLE %in% region_interest$full) %>%
+  group_by(AREA_TITLE) %>%
+  mutate(tot_emp_GL = sum(as.numeric(TOT_EMP), na.rm=TRUE))
+          
+soc_interest <- soc_interest %>%
+  mutate(state_emp_percent = as.numeric(TOT_EMP)/tot_emp_GL)
+          
+# CCIA Occupations data (manually defined)
+ccia_soc_gb <- read_excel("./CCIA_occupations.xlsx", sheet=1)
+ccia_soc_energy <- read_excel("./CCIA_occupations.xlsx", sheet=2)
+ccia_soc_zev <- read_excel("./CCIA_occupations.xlsx", sheet=3)
+          
+ccia_soc <- c(ccia_soc_gb$soc, ccia_soc_energy$soc, ccia_soc_zev$soc)
+
+# Calculate LQ
+soc_interest <- soc_interest %>% filter(OCC_CODE %in% ccia_soc)
+soc_interest$TOT_EMP[116] <- 0
+soc_interest$EMP_PRSE[116] <- 0
+soc_interest_lq <- soc_interest %>%
+  select(AREA_TITLE, OCC_CODE, OCC_TITLE, TOT_EMP, LOC_QUOTIENT, state_emp_percent) %>%
+  ungroup() %>%
+  group_by(OCC_TITLE) %>%
+  mutate(soc_avg_share_interest = sum(state_emp_percent)/6)
+          
+soc_interest_lq$interest_LQ <- soc_interest_lq$state_emp_percent/soc_interest_lq$soc_avg_share_interest
+write.csv(soc_interest_lq, file=paste0("./", state_abbreviation, "/CCIA_soc_interest.csv"))
+write.csv(soc_interest_lq %>% filter(AREA_TITLE == state_name), file=paste0("./",state_abbreviation, "/state_soc.csv"))
+
+# At County level
+county_occs <- read_excel("./Data/20232025Occupations_AllProjRLMA1.xls", skip = 5)
+county_soc <- county_occs %>% filter(`Occ. \nCode` %in% ccia_soc) %>% select(`Occ. \nCode`, `Occupational Title`,  `2023 \nEstimate`, `2025\nProjected`)
+emp_2023 <- sum(as.numeric(county_occs$`2023 \nEstimate`), na.rm=TRUE) # Total employees in region in 2023   
+emp_2025 <- sum(as.numeric(county_occs$`2025\nProjected`), na.rm=TRUE) # Total projected employees in region in 2025
+
+soc_state$TOT_EMP[which(soc_state$TOT_EMP == "**")]  <- NA                                                             
+soc_state$STATE_SHARE <- as.numeric(soc_state$TOT_EMP)/as.numeric(soc_state$TOT_EMP[soc_state$OCC_CODE=="00-0000"]) # state share of employment in occupation
+LQ_county <- left_join(county_soc, soc_state %>% select(OCC_CODE, OCC_TITLE, TOT_EMP, LOC_QUOTIENT, STATE_SHARE), by = c("Occ. \nCode" = "OCC_CODE")) 
+LQ_county$region_share <- as.numeric(LQ_county$`2025\nProjected`)/emp_2025
+
+# Calculate LQ of employment share in counties vs. state and national employment share
+LQ_county$state_lq <- LQ_county$region_share/LQ_county$STATE_SHARE
+LQ_county$national_lq <- LQ_county$region_share/(LQ_county$STATE_SHARE/as.numeric(LQ_county$LOC_QUOTIENT))
+
+write.csv(LQ_county, file=paste0("./DataWrapper/",state_abbreviation,"_county_workforce"))
+
+head(LQ_county)
+```
+
+## Net Zero America Projections
+This report from Princeton models the mix of renewables and jobs needed to reach different decarbonization scenarios. The E+, High Electrification, and RE+, 100% Renewable, scenarios are used here. The jobs required to support such a transition are also modeled. In order to downscale the predictions from state level to regional level, a combination of employment and utility data are used as factors.
+
+### Graph modeled job creation by economic and resource sector
+Note that some of these are at state level, and some are at regional level. Resource sector isn't downscaled by another factor other than employment share, so the proportions of employment in each sector are the same as at the state level.
+```{r NZAP, echo=FALSE, warning=FALSE, include=FALSE}
+#Net Zero Scenario - Net Zero America
+file_url <- 'https://netzeroamerica.princeton.edu/data/nzap-data.csv'
+temp_file <- tempfile(fileext = ".csv")
+GET(url = file_url, write_disk(temp_file, overwrite = TRUE))
+nza <- read.csv(temp_file)  # 'sheet = 1' to read the first sheet
+
+nza<-nza %>%
+  mutate(geo=str_to_title(geo)) 
+nzap<-left_join(nza,census_divisions,by=c("geo"="State"))
+
+#States
+nza_states<-nzap %>%
+  filter(scenario %in% c("REF","E+","E+RE+")) %>%
+  drop_na(value) %>%
+  filter(geo != "national") %>%
+  group_by(year,geo,State.Code,scenario,filter_level_1,filter_level_2,filter_level_3,variable_name,unit) %>%
+  summarize_at(vars(value),sum) %>%
+  spread(year,value) %>%
+  filter(!is.na(State.Code)) %>%
+  mutate(scenario = factor(scenario, levels = c("REF", "E+", "E+RE+")))
+
+#Jobs by Economic Sector
+nza_jobs_econ <- nza_states %>%
+  ungroup()%>%
+  filter(State.Code==state_abbreviation) %>%
+  filter(filter_level_2=="Jobs",
+         filter_level_3=="By economic sector") %>%
+  mutate(variable_name=gsub("By economic sector - ","",variable_name)) %>%
+  select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
+  pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value") %>%
+  mutate(code=case_when(
+    variable_name=="Agriculture"~"11",
+    variable_name=="Mining"~"21",
+    variable_name=="Utilities"~"22",
+    variable_name=="Construction"~"23",
+    variable_name=="Manufacturing"~"31-33",
+    variable_name=="Trade"~"42",
+    variable_name=="Pipeline"~"48-49",
+    variable_name=="Professional"~"54",
+    variable_name=="Other"~"Other"
+  ))
+
+nza_jobs_region <- nza_jobs_econ %>%
+  left_join(region_cbp_2d %>% filter(region_id==1) %>% select(code,share),by=c("code"="code")) %>%
+  mutate(Value_downscale=Value*share*region_totalemp$share[region_totalemp$region_id=="1"]) 
+
+# Plot job creation in region
+plot_nza_jobs_econ<-ggplot(data=nza_jobs_region, aes(x=year,y=Value_downscale,fill=variable_name)) +
+  geom_col(position='stack') +
+  facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette)+
+  labs(title=paste("Job Creation in", region_name,"in a Net Zero Scenario"), 
+       x="Year", y="Jobs",
+       fill="Economic Sector",
+       caption="Source: Net Zero America (2021), Princeton University") +
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()+
+  theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_jobs_econ.png"),plot=plot_nza_jobs_econ,width=8,height=6,units="in",dpi=300)
+
+
+# Plot job creation at state level
+plot_nza_jobs_econ_state<-ggplot(data=nza_jobs_region, aes(x=year,y=Value,fill=variable_name)) +
+  geom_col(position='stack') +
+  facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette)+
+  labs(title=paste("Job Creation in", state_name,"in a Net Zero Scenario"), 
+       x="Year", y="Jobs",
+       fill="Economic Sector",
+       caption="Source: Net Zero America (2021), Princeton University") +
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()+
+  theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_jobs_econ_state.png"),plot=plot_nza_jobs_econ_state,width=8,height=6,units="in",dpi=300)
+
+
+#Jobs by Resource Sector
+nza_jobs_resource <- nza_states %>%
+  ungroup()%>%
+  filter(State.Code==state_abbreviation) %>%
+  filter(filter_level_2=="Jobs",
+         filter_level_3=="By resource sector") %>%
+  mutate(variable_name=gsub("By resource sector - ","",variable_name)) %>%
+  select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
+  pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value")
+
+nza_jobs_resource_region <- nza_jobs_resource %>%
+  mutate(Value_downscale=Value*region_totalemp$share[region_totalemp$region_id=="1"]) 
+
+# Plot job creation in region, which is same proportions as state
+plot_nza_jobs_resource<-ggplot(data=nza_jobs_resource_region, aes(x=year,y=Value_downscale,fill=variable_name)) +
+  geom_col(position='stack') +
+  facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette)+
+  labs(title=paste("Job Creation in", region_name,"in a Net Zero Scenario"), 
+       x="Year", y="Jobs",
+       fill="Resource Sector",
+       caption="Source: Net Zero America (2021), Princeton University") +
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()+
+  theme(legend.position="bottom")
+
+ggsave(paste0(output_folder,"/",state_abbreviation,"_nza_jobs_resource.png"),plot=plot_nza_jobs_resource,width=8,height=6,units="in",dpi=300)
+plot_nza_jobs_resource
+```
+
+### Graph of modeled generation capacity out to 2050, based on least cost siting methods
+See https://netzeroamerica.princeton.edu/the-report for more details on modeling constraints
+```{r, gencap chart, echo=FALSE, warning=FALSE}
+#Generating Capacity Chart
+nza_capacity<- nza_states %>%
+  filter(State.Code==state_abbreviation) %>%
+  filter(filter_level_2=="Generating capacity",
+         filter_level_3 != "Capital invested") %>%
+  filter(!grepl("Constrained",variable_name)) %>%
+  mutate(variable_name=gsub("Installed renewables - ","",variable_name),
+         variable_name=gsub(" - Base land use assumptions","",variable_name),
+         variable_name=gsub("Installed thermal - ","",variable_name)) %>%
+  ungroup() %>%
+  select(State.Code,variable_name,scenario,`2025`,`2030`,`2035`,`2040`,`2045`,`2050`) %>%
+  pivot_longer(cols=c(`2025`,`2030`,`2035`,`2040`,`2045`,`2050`),names_to="year",values_to="Value") %>%
+  mutate(variable=ifelse(grepl("Biomass",variable_name),"Biomass",variable_name))
+
+nza_capacity$variable[nza_capacity$variable=="Rooftop PV"] <- "Solar"
+nza_capacity$variable[nza_capacity$variable=="Natural gas"] <- "Natural Gas"
+
+# Plot state generation capacity
+plot_nza_ren_cap_state<-ggplot(data=nza_capacity,aes(x=year,y=Value,fill=variable_name)) +
+  geom_col(position='stack') +
+  facet_wrap(~scenario) +  # Adding faceting to create separate plots for each scenario
+  scale_fill_manual(values = expanded_palette)+
+  labs(title=paste("New electricity generation capacity in", state_name, "in a Net Zero Scenario"),
+       subtitle = "Downscaled investment figures based on existing share of statewide electricity capacity.",
+       x="Year", y="MW",
+       fill="Electricity Source",
+       caption="Source: Net Zero America (2021), Princeton University") +
+  scale_y_continuous(expand = c(0,0))+
+  theme_classic()
+plot_nza_ren_cap_state
+```
