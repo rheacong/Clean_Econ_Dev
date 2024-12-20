@@ -1,7 +1,7 @@
 ---
 title: "Econ Dev Basics"
 author: "rjcong"
-date: "2024-12-02"
+date: "2024-12-20"
 output: html_document
 ---
 
@@ -1031,8 +1031,8 @@ ggsave(paste0(output_folder,"/","MSA_feasibility_industry.png"),plot=MSA_feas_pl
 The script contains data from County Business Patterns and BLS Quarterly Census of Employment and Wages, from which you can calculate fossil fuel employment, employment diversity, location quotients, and wages. We also defined occupations most relevant to CCIA priority projects from SOC data.
 
 ### CBP employment data
-by NAICS codes
-```{r cbp, echo=FALSE, warning=FALSE, include=FALSE}
+Measuring regional employment by NAICS code relative to the state.
+```{r cbp, echo=FALSE, warning=FALSE}
 # Define region_id as the counties in the EA or MSA of interest
 us_counties <-us_map("counties")
 us_counties_df <- as.data.frame(us_counties) %>% select(-geom)
@@ -1167,7 +1167,7 @@ This report from Princeton models the mix of renewables and jobs needed to reach
 
 ### Graph modeled job creation by economic and resource sector
 Note that some of these are at state level, and some are at regional level. Resource sector isn't downscaled by another factor other than employment share, so the proportions of employment in each sector are the same as at the state level.
-```{r NZAP, echo=FALSE, warning=FALSE, include=FALSE}
+```{r NZAP, echo=FALSE, warning=FALSE}
 #Net Zero Scenario - Net Zero America
 file_url <- 'https://netzeroamerica.princeton.edu/data/nzap-data.csv'
 temp_file <- tempfile(fileext = ".csv")
