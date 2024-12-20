@@ -370,13 +370,3 @@ ggrf_total_national <- ggrf_tech %>%
   summarise(total_investment = sum(investment))
 
 write.csv(ggrf_total_national, file="./DataWrapper/state_ggrf_needs")
-
-# DW Minnesota investment by county
-ggrf_MN_county <- ggrf_tech %>%
-  filter(State == state_name) %>%
-  group_by(County) %>%
-  summarise(total_investment = sum(investment))
-
-ggrf_MN_county$county <- gsub(" County", "", ggrf_MN_county$County)
-
-write.csv(ggrf_MN_county, file="./DataWrapper/MN_county_ggrf")
